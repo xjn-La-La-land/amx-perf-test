@@ -11,7 +11,9 @@
 2. 运行 gemm-test，测试矩阵乘法算子 `cblas_gemm_bf16bf16f32` 的性能
 
    ```bash
-   $ ./test.sh # 不同矩阵大小下运行 gemm-test
+   # 不同矩阵大小下运行 gemm-test
+   $ ./test.sh multi # 多核运行
+   $ ./test.sh single # 单核运行
    ```
 
 3. 安装 intel vtune 分析器
@@ -24,6 +26,6 @@
 
 4. 使用 intel vtune 分析器统计AMX功能部件的利用率
    ```bash
-   $ vtune -collect uarch-exploration -knob sampling-interval=0.5 -knob pmu-collection-mode=summary -r ./perf/ -- ./test.sh 
+   $ vtune -collect uarch-exploration -knob sampling-interval=0.5 -knob pmu-collection-mode=summary -r ./perf/ -- ./test.sh multi
    ```
    在打印的总结报告中，可以找到 **AMX Busy: ?% of Clockticks**.

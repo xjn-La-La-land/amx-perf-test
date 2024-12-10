@@ -19,6 +19,9 @@ $(BIN): $(SRC)
 run: $(BIN)
 	@ ./$(BIN)
 
+run-single: $(BIN)
+	taskset -c 0 ./$(BIN)
+
 clean:
 	rm -f $(BIN) $(LOG)
  

@@ -21,7 +21,7 @@ run: $(BIN)
 	@ ./$(BIN)
 
 run-setcore: $(BIN)
-	taskset -c 0-$(shell expr $(NUM_CORES) - 1) ./$(BIN)
+	@ taskset -c 0-$(shell expr $(NUM_CORES) - 1) ./$(BIN)
 	
 clean:
 	rm -f $(BIN) $(LOG)

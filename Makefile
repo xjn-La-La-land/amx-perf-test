@@ -13,15 +13,16 @@ CFLAGS_MSIZE += -DMSIZE_N=$(n)
 CFLAGS_MSIZE += -DMSIZE_K=$(k)
 CFLAGS += $(CFLAGS_MSIZE)
 
+
 $(BIN): $(SRC)
 	@ $(CC) $^ $(CFLAGS) $(LDFLAGS) -o $@ 
 
 run: $(BIN)
 	@ ./$(BIN)
 
-run-single: $(BIN)
-	taskset -c 0 ./$(BIN)
-
+run-setcore: $(BIN)
+	taskset -c 0-$(shell expr $(NUM_CORES) - 1) ./$(BIN)
+	
 clean:
 	rm -f $(BIN) $(LOG)
  

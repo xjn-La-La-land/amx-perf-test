@@ -12,16 +12,25 @@ k_start=100
 k_end=4000
 k_step=100
 
+if [ "$#" = 0 ]; then
+    echo "Running on all cores..."
+    num_cores=-1
+elif [ "$#" = 2 ] && [ "$1" = "-c" ]; then
+    echo "Running on $2 cores..."
+    num_cores=$2
+else
+    echo "Usage: ./test.sh [-c num_cores]"
+    exit 1
+fi
+
+
 # 循环遍历所有参数组合
 for k in $(seq $k_start $k_step $k_end); do
     echo "Running with m=$m, n=$n, k=$k..."
-    if [ "$1" = "single" ]; then
-        make run-single m=$m n=$n k=$k -B
-    elif [ "$1" = "multi" ]; then
+    if [ "$num_cores" = -1 ]; then
         make run m=$m n=$n k=$k -B
     else
-        echo "Usage: ./test.sh [single|multi]"
-        exit 1
+        make run-setcore m=$m n=$n k=$k NUM_CORES=$num_cores -B
     fi
 done
 

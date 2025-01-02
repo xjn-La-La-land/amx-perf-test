@@ -17,9 +17,9 @@
 
 int main() 
 {
-    MKL_BF16 *A;
-    MKL_BF16  *B;
-    float *C;
+    uint8_t *A;
+    int8_t  *B;
+    int32_t *C;
     int m, n, k;
     float alpha, beta;
     int i, r;
@@ -34,9 +34,9 @@ int main()
     alpha = 1.0; beta = 1.0;
 
     // Allocating memory for matrices aligned on 64-byte boundary for better performance
-    A = (MKL_BF16 *)mkl_malloc( m*k*sizeof( MKL_BF16 ), 64 );
-    B = (MKL_BF16 *)mkl_malloc( k*n*sizeof( MKL_BF16 ), 64 );
-    C = (float *)mkl_malloc( m*n*sizeof( float ), 64 );
+    A = (uint8_t *)mkl_malloc( m*k*sizeof( uint8_t ), 64 );
+    B = (int8_t  *)mkl_malloc( k*n*sizeof(  int8_t ), 64 );
+    C = (int32_t *)mkl_malloc( m*n*sizeof( int32_t ), 64 );
     if (A == NULL || B == NULL || C == NULL) {
         printf( "\n ERROR: Can't allocate memory for matrices. Aborting... \n\n");
         mkl_free(A);
@@ -48,17 +48,17 @@ int main()
     // Initializing matrix data
     srand(time(NULL));
     for (i = 0; i < (m*k); i++) {
-        A[i] = (MKL_BF16)(rand());
+        A[i] = (uint8_t)(rand());
     }
     for (i = 0; i < (k*n); i++) {
-        B[i] = (MKL_BF16)(rand());
+        B[i] = (int8_t)(rand());
     }
     for (i = 0; i < (m*n); i++) {
-        C[i] = (float)(rand());
+        C[i] = (int32_t)(rand());
     }
 
     // Ignore the Time Required for the First Call
-    cblas_gemm_bf16bf16f32(
+    cblas_gemm_s8u8s32(
         CblasRowMajor,  // 矩阵存储为行优先
         CblasNoTrans,   // A 不转置
         CblasNoTrans,   // B 不转置
@@ -73,7 +73,7 @@ int main()
     dsecnd(); // dummy call to improve accuracy of timing
     double time_st = dsecnd();
     for (r = 0; r < LOOP_COUNT; r++) {
-        cblas_gemm_bf16bf16f32(
+        cblas_gemm_s8u8s32(
             CblasRowMajor,  // 矩阵存储为行优先
             CblasNoTrans,   // A 不转置
             CblasNoTrans,   // B 不转置
@@ -87,10 +87,10 @@ int main()
     }
     double time_end = dsecnd();
     double time_avg = (time_end - time_st) / LOOP_COUNT;
-    double gflop = (2.0*m*n*k)*1E-9;
+    double top = (2.0*m*n*k)*1E-12;
     
-    printf("Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f gflops %.5f\n", m, k, n, (time_avg * 1000), gflop/time_avg);
-    fprintf(file, "Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f gflops %.5f\n", m, k, n, (time_avg * 1000), gflop/time_avg);
+    printf("Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f tops %.5f\n", m, k, n, (time_avg * 1000), top/time_avg);
+    fprintf(file, "Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f tops %.5f\n", m, k, n, (time_avg * 1000), top/time_avg);
 
     // Deallocating memory
     mkl_free(A);

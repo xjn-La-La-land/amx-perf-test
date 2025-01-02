@@ -1,3 +1,3 @@
-gemm-report.csv
-results.txt
+*.csv
+*.txt
 *.png

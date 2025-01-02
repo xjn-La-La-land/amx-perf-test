@@ -8,7 +8,7 @@
    $ source $HOME/intel/oneapi/setvars.sh # 设置环境变量
    ```
 
-2. 运行 gemm-test，测试矩阵乘法算子 `cblas_gemm_bf16bf16f32` 的性能
+2. 运行 gemm-test，测试矩阵乘法算子 `cblas_gemm_s8u8s32`/`cblas_gemm_bf16bf16f32` 的性能
 
    ```bash
    # 不同矩阵大小下运行 gemm-test

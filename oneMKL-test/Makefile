@@ -1,6 +1,9 @@
-SRC = gemm-test.c
-BIN = gemm-test
-LOG = results.txt
+DATA_TYP = s8u8
+SRC = gemm_$(DATA_TYP)_test.c
+BUILD_DIR = ./build
+
+BIN = $(BUILD_DIR)/gemm-test
+LOG = $(BUILD_DIR)/results.txt
 
 IPATH = $(HOME)/miniconda/include
 LPATH = $(HOME)/miniconda/lib
@@ -24,6 +27,6 @@ run-setcore: $(BIN)
 	@ taskset -c 0-$(shell expr $(NUM_CORES) - 1) ./$(BIN)
 	
 clean:
-	rm -f $(BIN) $(LOG)
- 
+	rm -f $(BUILD_DIR)
+
 default: $(BIN)

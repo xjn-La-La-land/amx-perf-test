@@ -2,8 +2,10 @@ import matplotlib.pyplot as plt
 
 # 1. 读取文件并解析数据
 matrix_sizes = []
-times = []
-gflops = []
+# times = []
+# tops = []
+# core_num = []
+amx_usage = []
 
 with open(".results.txt", "r") as file:
     for line in file:
@@ -18,9 +20,9 @@ plt.figure(figsize=(8, 6))  # 设置图表尺寸
 plt.plot(matrix_sizes, times, marker="o", markersize=2, label="Time vs Matrix Size")
 
 # 3. 添加标题和标签
-plt.title("time vs matrix size for cblas_gemm_bf16bf16f32", fontsize=14)
+plt.title("amx usage vs matrix size for cblas_gemm_s8u8s32", fontsize=14)
 plt.xlabel("Matrix Size(m*n*k)", fontsize=12)
-plt.ylabel("Average Runtime(milliseconds)", fontsize=12)
+plt.ylabel("AMX Usage(% of Clockticks)", fontsize=12)
 
 # 4. 显示网格和图例
 plt.grid(True, linestyle="--", alpha=0.7)
@@ -29,4 +31,3 @@ plt.legend()
 # 5. 保存图表或显示
 plt.savefig("cblas_gemm_bf16bf16f32.png", dpi=300)  # 保存图表
 plt.show()  # 显示图表
-

@@ -1,0 +1,282 @@
+# AMPLXE_PERF_STAT
+# hostname : zkyd
+# os release : 6.8.0-49-generic
+# arch : x86_64
+# cpuid : GenuineIntel,6,207,2
+# cpudesc : INTEL(R) XEON(R) PLATINUM 8580
+# total memory : 1056407632 kB
+# nrcpus online : 240
+# nrcpus avail : 240
+# sibling cores : 0-59,120-179
+# sibling cores : 60-119,180-239
+# sibling threads : 0,120
+# sibling threads : 1,121
+# sibling threads : 2,122
+# sibling threads : 3,123
+# sibling threads : 4,124
+# sibling threads : 5,125
+# sibling threads : 6,126
+# sibling threads : 7,127
+# sibling threads : 8,128
+# sibling threads : 9,129
+# sibling threads : 10,130
+# sibling threads : 11,131
+# sibling threads : 12,132
+# sibling threads : 13,133
+# sibling threads : 14,134
+# sibling threads : 15,135
+# sibling threads : 16,136
+# sibling threads : 17,137
+# sibling threads : 18,138
+# sibling threads : 19,139
+# sibling threads : 20,140
+# sibling threads : 21,141
+# sibling threads : 22,142
+# sibling threads : 23,143
+# sibling threads : 24,144
+# sibling threads : 25,145
+# sibling threads : 26,146
+# sibling threads : 27,147
+# sibling threads : 28,148
+# sibling threads : 29,149
+# sibling threads : 30,150
+# sibling threads : 31,151
+# sibling threads : 32,152
+# sibling threads : 33,153
+# sibling threads : 34,154
+# sibling threads : 35,155
+# sibling threads : 36,156
+# sibling threads : 37,157
+# sibling threads : 38,158
+# sibling threads : 39,159
+# sibling threads : 40,160
+# sibling threads : 41,161
+# sibling threads : 42,162
+# sibling threads : 43,163
+# sibling threads : 44,164
+# sibling threads : 45,165
+# sibling threads : 46,166
+# sibling threads : 47,167
+# sibling threads : 48,168
+# sibling threads : 49,169
+# sibling threads : 50,170
+# sibling threads : 51,171
+# sibling threads : 52,172
+# sibling threads : 53,173
+# sibling threads : 54,174
+# sibling threads : 55,175
+# sibling threads : 56,176
+# sibling threads : 57,177
+# sibling threads : 58,178
+# sibling threads : 59,179
+# sibling threads : 60,180
+# sibling threads : 61,181
+# sibling threads : 62,182
+# sibling threads : 63,183
+# sibling threads : 64,184
+# sibling threads : 65,185
+# sibling threads : 66,186
+# sibling threads : 67,187
+# sibling threads : 68,188
+# sibling threads : 69,189
+# sibling threads : 70,190
+# sibling threads : 71,191
+# sibling threads : 72,192
+# sibling threads : 73,193
+# sibling threads : 74,194
+# sibling threads : 75,195
+# sibling threads : 76,196
+# sibling threads : 77,197
+# sibling threads : 78,198
+# sibling threads : 79,199
+# sibling threads : 80,200
+# sibling threads : 81,201
+# sibling threads : 82,202
+# sibling threads : 83,203
+# sibling threads : 84,204
+# sibling threads : 85,205
+# sibling threads : 86,206
+# sibling threads : 87,207
+# sibling threads : 88,208
+# sibling threads : 89,209
+# sibling threads : 90,210
+# sibling threads : 91,211
+# sibling threads : 92,212
+# sibling threads : 93,213
+# sibling threads : 94,214
+# sibling threads : 95,215
+# sibling threads : 96,216
+# sibling threads : 97,217
+# sibling threads : 98,218
+# sibling threads : 99,219
+# sibling threads : 100,220
+# sibling threads : 101,221
+# sibling threads : 102,222
+# sibling threads : 103,223
+# sibling threads : 104,224
+# sibling threads : 105,225
+# sibling threads : 106,226
+# sibling threads : 107,227
+# sibling threads : 108,228
+# sibling threads : 109,229
+# sibling threads : 110,230
+# sibling threads : 111,231
+# sibling threads : 112,232
+# sibling threads : 113,233
+# sibling threads : 114,234
+# sibling threads : 115,235
+# sibling threads : 116,236
+# sibling threads : 117,237
+# sibling threads : 118,238
+# sibling threads : 119,239
+# process id : 338274
+;;590587031807;0
+;;436044169040;1
+;;470028178771;2
+;;573950071574;3
+;;72736515;4
+;;72927795;5
+;;15549;6
+;;137447106288;7
+;;7219314736;8
+;;32259378;9
+;;0;10
+;;579840001166;11
+;;293726900597;12
+;;351713496601;13
+;;14605625;14
+;;618990031;15
+;;2312938909;16
+;;895716301;17
+;;1987684817;18
+;;62343995;19
+;;66203243200;20
+;;82182720659;21
+;;46944396528;22
+;;0;23
+;;128563766751;24
+;;213004927;25
+;;69270553252;26
+;;965418384;27
+;;19530950;28
+;;14870272;29
+;;140950076;30
+;;11652513449;31
+;;32663;32
+;;23175960;33
+;;1534216947;34
+;;474383683;35
+;;69568307531;36
+;;3658806166;37
+;;2756064983;38
+;;3417478;39
+;;57523289;40
+;;472649671;41
+;;477587109;42
+;;392112425;43
+;;56687741580;44
+;;11489426960;45
+;;889490869398;46
+;;2163032470;47
+;;2121995019;48
+;;69108;49
+;;158139594;50
+;;5525641;51
+;;3990260;52
+;;137987573141;53
+;;121267083705;54
+;;42297237393;55
+;;303753844;56
+;;132390525666;57
+;;24669788878;58
+;;66177919;59
+;;2537006;60
+;;3316635;61
+;;26432627;62
+;;121377;63
+;;56719897194;64
+;;2337512;65
+;;18642;66
+;;950085;67
+;;94622;68
+;;19641;69
+;;122643430;70
+;;125906669;71
+;;131751523;72
+;;122017181984;73
+;;4513401970;74
+;;4109811102;75
+;;131228315;76
+;;247618888;77
+;;1328862010;78
+;;67736479046;79
+;;121188669788;80
+;;2773528260;81
+;;313441654603;82
+;;2233257789;83
+;;2672795927257;84
+;;4233452503;85
+;;667933967768;86
+;;3513078916188;87
+;;83279276816;88
+;;563229387242;89
+;;206854192516;90
+;;131172204332;91
+;;72352514382;92
+;;31136280645;93
+;;561413692632;94
+;;19562333522;95
+;;1960037720;96
+;;4878149957;97
+;;87730332782;98
+;;33124097572;99
+;;395389462821;100
+;;4262629617;101
+;;1031268217;102
+;;1445555946;103
+;;1016380194;104
+;;0;105
+;;0;106
+;;0;107
+;;174696187792;108
+;;5275210492;109
+;;224;110
+;;0;111
+;;0;112
+;;0;113
+;;761624;114
+;;42246476935;115
+;;69902119871;116
+;;194122675885;117
+;;28326767842;118
+;;69550251563;119
+;;144205722846;120
+;;27482532392;121
+;;518860206704;122
+;;212436774;123
+;;0;124
+;;13777;125
+;;0;126
+;;0;127
+;;0;128
+;;0;129
+;;0;130
+;;0;131
+;;0;132
+;;0;133
+;;0;134
+;;92206367011;135
+;;0;136
+;;0;137
+;;0;138
+;;0;139
+;;0;140
+;;0;141
+;;163291348473;142
+;;222280;143
+;;129083;144
+;;0;145
+;;8466706;146
+;;0;147
+;;0;148
+;;0;149

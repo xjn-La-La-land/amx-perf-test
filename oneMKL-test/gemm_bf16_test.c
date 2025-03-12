@@ -5,15 +5,6 @@
 
 #define min(x,y) (((x) < (y)) ? (x) : (y))
 #define LOOP_COUNT 1000
-#ifndef MSIZE_M
-#define MSIZE_M 1000
-#endif
-#ifndef MSIZE_N
-#define MSIZE_N 1000
-#endif
-#ifndef MSIZE_K
-#define MSIZE_K 200
-#endif
 
 int main() 
 {
@@ -24,7 +15,7 @@ int main()
     float alpha, beta;
     int i, r;
 
-    FILE *file = fopen("./results.txt", "a");
+    FILE *file = fopen("./build/log.txt", "a");
     if (file == NULL) {
         perror("cannot open file");
         return 1;

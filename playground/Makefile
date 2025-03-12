@@ -1,26 +1,26 @@
-DATA_TYP = s8u8
-SRC = gemm_$(DATA_TYP)_test.c
+SRC = $(wildcard *.cpp)
 BUILD_DIR = ./build
 
-BIN = $(BUILD_DIR)/gemm-test
+BIN = $(BUILD_DIR)/amx_gemm-test
 LOG = $(BUILD_DIR)/results.txt
 
 CC = mpic++
-CFLAGS = -m64 -DMKL_ALIGN -DMKL_LD
-LDFLAGS = -m64 -lmkl_scalapack_lp64 -Wl,--no-as-needed -lmkl_cdft_core -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lmkl_blacs_openmpi_lp64 -lgomp -lpthread -lm -ldl
+CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
+LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
 
 m ?= 4160
 n ?= 4160
 k ?= 4160
+core ?= 0-119
 CFLAGS_MSIZE += -DMSIZE_M=$(m)
 CFLAGS_MSIZE += -DMSIZE_N=$(n)
 CFLAGS_MSIZE += -DMSIZE_K=$(k)
 CFLAGS += $(CFLAGS_MSIZE)
 
 
-$(BIN): $(SRC)
+$(BIN): $(SRC) $(wildcard *.hpp)
 	@ mkdir -p $(BUILD_DIR)
-	$(CC) $^ $(CFLAGS) $(LDFLAGS) -o $@ 
+	@ $(CC) $^ $(CFLAGS) $(LDFLAGS) -o $@ 
 
 run: $(BIN)
 	@ ./$(BIN)

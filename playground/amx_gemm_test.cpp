@@ -1,77 +1,88 @@
-#include "amx_tile.hpp"
+#include "amx_gemm_example.hpp"
 #include <stdio.h>
+#include <cassert>
+#include <mkl.h>
 
-type_t A_mem[M][K];              // A matrix
-type_t B_mem[K/KPACK][N][KPACK]; // B matrix
-res_type_t C_mem[M][N];          // C matrix
+#ifndef MSIZE_M
+#define MSIZE_M 1024
+#endif
+#ifndef MSIZE_N
+#define MSIZE_N 1024
+#endif
+#ifndef MSIZE_K
+#define MSIZE_K 1024
+#endif
+#define LOOP_COUNT 100
 
-type_t B_mem_orig[K][N];
-res_type_t C_mem_expected[M][N];
+#define M MSIZE_M       // Number of rows in the A or C matrices
+#define K MSIZE_K       // Number of columns in the A or rows in the B matrices
+#define N MSIZE_N       // Number of columns in the B or C matrices
+uint8_t A_mem[M][K];    // A matrix
+uint8_t B_mem[K][N];    // B matrix
+int32_t C_mem[M][N];    // C matrix
 
-static int8_t next_int8(int8_t i)
-{
-	if (i == 127)
-		return -128;
-	return i + 1;
-}
+int32_t C_mem_expected[M][N];
+
 
 static void init_sources()
 {
-	int8_t counter = -128;
-
-	memset(C_mem, 0, sizeof(C_mem));
+	uint8_t counter = 0;
 
 	for (size_t m = 0; m < M; m++) {
 		for (size_t k = 0; k < K; k++) {
-			A_mem[m][k] = counter;
-			counter = next_int8(counter);
+			A_mem[m][k] = counter++;
 		}
 	}
 
 	for (size_t k = 0; k < K; k++) {
 		for (size_t n = 0; n < N; n++) {
-			B_mem_orig[k][n] = counter;
-			counter = next_int8(counter);
+			B_mem[k][n] = counter++;
 		}
 	}
 
-	for (size_t m = 0; m < M; m++)
-		for (size_t n = 0; n < N; n++)
-			for (size_t k = 0; k < K; k++)
-				C_mem_expected[m][n] += ((int32_t) A_mem[m][k]) * ((int32_t) B_mem_orig[k][n]);
 }
 
+// check the correctness
 static void amx_gemm_int8_test()
 {
-	// B matrix Re-layout
-	for (int k = 0; k < K; ++k)
-		for (int n = 0; n < N; ++n)
-			B_mem[k / KPACK][n][k % KPACK] = B_mem_orig[k][n];
+    for (size_t m = 0; m < M; m++)
+		for (size_t n = 0; n < N; n++)
+			for (size_t k = 0; k < K; k++)
+				C_mem_expected[m][n] += ((int32_t) (int8_t) A_mem[m][k]) * ((int32_t) B_mem[k][n]);
+    
+    // compute C += A*B
+	amx_gemm_s8u8s32_example(A_mem, B_mem, C_mem, M, N, K);
 
-  // compute C += A*B
-	amx_gemm_int8();
-
-  // print the results 
-  for (size_t m = 0; m < M; ++m) {
-    printf("[");
-    for (size_t n = 0; n < N; ++n) {
-      printf("%6d", C_mem_expected[m][n]);
+    // check the results 
+    for (size_t m = 0; m < M; ++m) {
+        for (size_t n = 0; n < N; ++n) {
+            // printf("C_mem_expected[%d][%d] = %d, C_mem[%d][%d] = %d\n", m, n, C_mem_expected[m][n], m, n, C_mem[m][n]);
+            assert(C_mem_expected[m][n] == C_mem[m][n]);
+        }
     }
-    printf("]\n");
-    printf("[");
-    for (size_t n = 0; n < N; ++n) {
-      printf("%6d", C_mem[m][n]);
-    }
-    printf("]\n");
-  }
+    printf("test pass!\n");
 }
 
 
 int main()
 {
 	init_sources();
+	if (!set_tiledata_use())
+      exit(-1);
 
-	amx_gemm_int8_test();
+    // Ignore the Time Required for the First Call
+    amx_gemm_s8u8s32_example(A_mem, B_mem, C_mem, M, N, K);
+    
+    dsecnd(); // dummy call to improve accuracy of timing
+    double time_st = dsecnd();
+    for (int r = 0; r < LOOP_COUNT; ++r) {
+        amx_gemm_s8u8s32_example(A_mem, B_mem, C_mem, M, N, K);
+    }
+    double time_end = dsecnd();
+    double time_avg = (time_end - time_st) / LOOP_COUNT;
+    double top = (2.0*M*N*K)*1E-12;
+
+    printf("Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f tops %.5f\n", M, K, N, (time_avg * 1000), top/time_avg);
 
   return 0;
 }

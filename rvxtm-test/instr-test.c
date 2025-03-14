@@ -22,7 +22,7 @@ void _start() {
     "sll t5, t4, 2\n\t"
     "srl t6, t5, 1\n\t"
 
-    ".insn 0x012fc08b\n\t"  // tileloadd tmm1, 0(x31), x18
+    ".insn 0x01d6420b\n\t"  // tileloadd tmm4, 0(x12), x29
 
     "li t0, 0x1234\n\t"
     "sub t2, t1, t0\n\t"
@@ -34,7 +34,7 @@ void _start() {
     "sll t6, t5, 2\n\t"
     "addi t1, t0, -1\n\t"
 
-    ".insn 0x012fd08b\n\t" // tilestored tmm1, 0(x31), x18
+    ".insn 0x01d6620b\n\t" // tilestored tmm4, 0(x12), x29
   
     "li t0, 0x5678\n\t"
     "add t1, t0, t0\n\t"
@@ -46,7 +46,7 @@ void _start() {
     "sll t5, t4, 2\n\t"
     "srl t6, t5, 1\n\t"
 
-    ".insn 0x0800088b\n\t" // tdpbssd tmm1, tmm2, tmm2
+    ".insn 0x00000a0b\n\t" // tdpbssd tmm4, tmm2, tmm0
     :
     : "r"(&mem_data)
     : "memory", "t0", "t1", "t2", "t3", "t4", "t5", "t6"

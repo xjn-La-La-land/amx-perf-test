@@ -1,8 +1,8 @@
-#include <cstdint>
-#include <iostream>
-#include <cassert>
 #include <array>
+#include <cassert>
+#include <cstdint>
 #include <iomanip>
+#include <iostream>
 
 #define ILEN 32
 
@@ -11,17 +11,16 @@
 
 #define TILELD_FUNCT3 0b100
 #define TILEST_FUNCT3 0b110
-#define TDPBSSD_FUNCT3 0b000
-#define TDPBSUD_FUNCT3 0b001
-#define TDPBUSD_FUNCT3 0b010
-#define TDPBUUD_FUNCT3 0b011
-
+#define TDPBSSD_FUNCT3 0b011
+#define TDPBSUD_FUNCT3 0b010
+#define TDPBUSD_FUNCT3 0b001
+#define TDPBUUD_FUNCT3 0b000
 
 class XtmInstr {
 public:
   static constexpr uint8_t opcode = XTM_OPCODE;
 
-  virtual uint32_t encode() const = 0; // 生成指令的 bit 码
+  virtual uint32_t encode() const = 0;           // 生成指令的 bit 码
   std::array<uint8_t, 4> encodeToBytes() const { // 生成小端序的字节数组
     uint32_t instr = encode();
     return {static_cast<uint8_t>(instr & 0xFF),
@@ -35,8 +34,9 @@ public:
   void printBytes() const { // 打印出字节序列
     auto iBytes = encodeToBytes();
     std::cout << "[";
-    for(int i = 0; i < 4; ++i) {
-      std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (uint32_t)iBytes[i];
+    for (int i = 0; i < 4; ++i) {
+      std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0')
+                << (uint32_t)iBytes[i];
       if (i != 3) {
         std::cout << ", ";
       }
@@ -45,7 +45,8 @@ public:
   }
 
   void printWord() const {
-    std::cout << "0x" << std::hex << std::setw(8) << std::setfill('0') << encode() << std::endl;
+    std::cout << "0x" << std::hex << std::setw(8) << std::setfill('0')
+              << encode() << std::endl;
   }
 };
 
@@ -64,17 +65,18 @@ public:
   uint32_t encode() const override {
     uint32_t instr = 0;
     instr |= (imm & 0xFE0) << (25 - 5); // imm[11:5]
-    instr |= rs2    << 20;              // rs2
-    instr |= rs1    << 15;              // rs1
+    instr |= rs2 << 20;                 // rs2
+    instr |= rs1 << 15;                 // rs1
     instr |= funct3 << 12;              // funct3
     instr |= (imm & 0x18) << (10 - 3);  // imm[4:3]
-    instr |= tmm1   << 7;               // tmm1
+    instr |= tmm1 << 7;                 // tmm1
     instr |= opcode;                    // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tileloadd tmm" << tmm1 << ", " << imm << "(x" << rs1 << "), x" << rs2 << std::endl;
+    std::cout << "tileloadd tmm" << tmm1 << ", " << imm << "(x" << rs1 << "), x"
+              << rs2 << std::endl;
   }
 };
 
@@ -94,17 +96,18 @@ public:
   uint32_t encode() const override {
     uint32_t instr = 0;
     instr |= (imm & 0xFE0) << (25 - 5); // imm[11:5]
-    instr |= rs2    << 20;              // rs2
-    instr |= rs1    << 15;              // rs1
+    instr |= rs2 << 20;                 // rs2
+    instr |= rs1 << 15;                 // rs1
     instr |= funct3 << 12;              // funct3
     instr |= (imm & 0x18) << (10 - 3);  // imm[4:3]
-    instr |= tmm1   << 7;               // tmm1
+    instr |= tmm1 << 7;                 // tmm1
     instr |= opcode;                    // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tilestored tmm" << tmm1 << ", " << imm << "(x" << rs1 << "), x" << rs2 << std::endl;
+    std::cout << "tilestored tmm" << tmm1 << ", " << imm << "(x" << rs1
+              << "), x" << rs2 << std::endl;
   }
 };
 
@@ -121,17 +124,18 @@ public:
   // 生成指令的 bit 码
   uint32_t encode() const override {
     uint32_t instr = 0;
-    instr |= tmm3 << 26; // tmm3
+    instr |= tmm3 << 26;         // tmm3
     instr |= (tmm2 & 0x4) << 25; // tmm2[2]
-    instr |= funct3 << 12; // funct3
+    instr |= funct3 << 12;       // funct3
     instr |= (tmm2 & 0x3) << 10; // tmm2[1:0]
-    instr |= tmm1 << 7; // tmm1
-    instr |= opcode;    // opcode
+    instr |= tmm1 << 7;          // tmm1
+    instr |= opcode;             // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tdpbssd tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3 << std::endl;
+    std::cout << "tdpbssd tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3
+              << std::endl;
   }
 };
 
@@ -148,17 +152,18 @@ public:
   // 生成指令的 bit 码
   uint32_t encode() const override {
     uint32_t instr = 0;
-    instr |= tmm3 << 26; // tmm3
+    instr |= tmm3 << 26;         // tmm3
     instr |= (tmm2 & 0x4) << 25; // tmm2[2]
-    instr |= funct3 << 12; // funct3
+    instr |= funct3 << 12;       // funct3
     instr |= (tmm2 & 0x3) << 10; // tmm2[1:0]
-    instr |= tmm1 << 7; // tmm1
-    instr |= opcode;    // opcode
+    instr |= tmm1 << 7;          // tmm1
+    instr |= opcode;             // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tdpbsud tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3 << std::endl;
+    std::cout << "tdpbsud tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3
+              << std::endl;
   }
 };
 
@@ -175,17 +180,18 @@ public:
   // 生成指令的 bit 码
   uint32_t encode() const override {
     uint32_t instr = 0;
-    instr |= tmm3 << 26; // tmm3
+    instr |= tmm3 << 26;         // tmm3
     instr |= (tmm2 & 0x4) << 25; // tmm2[2]
-    instr |= funct3 << 12; // funct3
+    instr |= funct3 << 12;       // funct3
     instr |= (tmm2 & 0x3) << 10; // tmm2[1:0]
-    instr |= tmm1 << 7; // tmm1
-    instr |= opcode;    // opcode
+    instr |= tmm1 << 7;          // tmm1
+    instr |= opcode;             // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tdpbusd tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3 << std::endl;
+    std::cout << "tdpbusd tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3
+              << std::endl;
   }
 };
 
@@ -202,29 +208,28 @@ public:
   // 生成指令的 bit 码
   uint32_t encode() const override {
     uint32_t instr = 0;
-    instr |= tmm3 << 26; // tmm3
+    instr |= tmm3 << 26;         // tmm3
     instr |= (tmm2 & 0x4) << 25; // tmm2[2]
-    instr |= funct3 << 12; // funct3
+    instr |= funct3 << 12;       // funct3
     instr |= (tmm2 & 0x3) << 10; // tmm2[1:0]
-    instr |= tmm1 << 7; // tmm1
-    instr |= opcode;    // opcode
+    instr |= tmm1 << 7;          // tmm1
+    instr |= opcode;             // opcode
     return instr;
   }
 
   void printInfo() const override {
-    std::cout << "tdpbuud tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3 << std::endl;
+    std::cout << "tdpbuud tmm" << tmm1 << ", tmm" << tmm2 << ", tmm" << tmm3
+              << std::endl;
   }
 };
-
-
 
 /* ------------------------------------------------------------------------ */
 #include <random>
 
 // generate some XTM instructions
 void genXTM_demo() {
-  std::random_device rd;  // 获取硬件随机数种子
-  std::mt19937 gen(rd()); // 使用梅森旋转算法生成随机数
+  std::random_device rd;                       // 获取硬件随机数种子
+  std::mt19937 gen(rd());                      // 使用梅森旋转算法生成随机数
   std::uniform_int_distribution<> dis(1, 100); // 创建一个均匀分布的随机数引擎
   for (int r = 0; r < 2; ++r) {
     int tmm1 = dis(gen) % 8;
@@ -234,9 +239,9 @@ void genXTM_demo() {
     int rs2 = dis(gen) % 32;
     int imm = 0;
 
-    TILELOADD  tileld(tmm1, rs1, rs2, imm);
+    TILELOADD tileld(tmm1, rs1, rs2, imm);
     TILESTORED tilest(tmm1, rs1, rs2, imm);
-    TDPBSSD    tdpbssd(tmm1, tmm2, tmm3);
+    TDPBSSD tdpbssd(tmm1, tmm2, tmm3);
 
     tileld.printInfo();
     tilest.printInfo();
@@ -251,4 +256,4 @@ void genXTM_demo() {
 int main() {
   genXTM_demo();
   return 0;
-} 
+}

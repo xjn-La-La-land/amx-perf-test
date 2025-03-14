@@ -21,7 +21,7 @@ __attribute__((optimize("O0"))) void test_wrapper() {
                "sll t5, t4, 2\n\t"
                "srl t6, t5, 1\n\t"
 
-               ".insn 0x01d6420b\n\t" // tileloadd tmm4, 0(x12), x29
+               ".insn 0x0039428b\n\t" // tileloadd tmm5, 0(x12), x3
 
                "li t0, 0x1234\n\t"
                "sub t2, t1, t0\n\t"
@@ -33,7 +33,7 @@ __attribute__((optimize("O0"))) void test_wrapper() {
                "sll t6, t5, 2\n\t"
                "addi t1, t0, -1\n\t"
 
-               ".insn 0x01d6620b\n\t" // tilestored tmm4, 0(x12), x29
+               ".insn 0x0039628b\n\t" // tilestored tmm5, 0(x12), x3
 
                "li t0, 0x5678\n\t"
                "add t1, t0, t0\n\t"
@@ -45,7 +45,7 @@ __attribute__((optimize("O0"))) void test_wrapper() {
                "sll t5, t4, 2\n\t"
                "srl t6, t5, 1\n\t"
 
-               ".insn 0x00000a0b\n\t" // tdpbssd tmm4, tmm2, tmm0
+               ".insn 0x08003e8b\n\t" // tdpbssd tmm5, tmm7, tmm0
                :
                : "r"(&mem_data)
                : "memory", "t0", "t1", "t2", "t3", "t4", "t5", "t6");

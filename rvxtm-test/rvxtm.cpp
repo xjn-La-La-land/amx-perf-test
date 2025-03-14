@@ -28,10 +28,10 @@ public:
             static_cast<uint8_t>((instr >> 16) & 0xFF),
             static_cast<uint8_t>((instr >> 24) & 0xFF)};
   }
-
-  virtual void printInfo() const = 0; // 打印指令汇编
-
-  void printBytes() const { // 打印出字节序列
+  // 打印指令汇编
+  virtual void printInfo() const = 0;
+  // 打印出字节序列
+  void printBytes() const {
     auto iBytes = encodeToBytes();
     std::cout << "[";
     for (int i = 0; i < 4; ++i) {
@@ -43,10 +43,16 @@ public:
     }
     std::cout << "]" << std::endl;
   }
-
+  // 输出指令的 32 位十六进制表示
   void printWord() const {
     std::cout << "0x" << std::hex << std::setw(8) << std::setfill('0')
               << encode() << std::endl;
+  }
+  // 输出内联汇编代码
+  void printInlineCode() const {
+    std::cout << "\".insn " << std::hex << std::setw(8) << std::setfill('0') << encode() << "\\n\\t\"";
+    std::cout << " // ";
+    printInfo();
   }
 };
 
@@ -243,13 +249,10 @@ void genXTM_demo() {
     TILESTORED tilest(tmm1, rs1, rs2, imm);
     TDPBSSD tdpbssd(tmm1, tmm2, tmm3);
 
-    tileld.printInfo();
-    tilest.printInfo();
-    tdpbssd.printInfo();
+    tileld.printInlineCode();
+    tilest.printInlineCode();
+    tdpbssd.printInlineCode();
 
-    tileld.printWord();
-    tilest.printWord();
-    tdpbssd.printWord();
   }
 }
 

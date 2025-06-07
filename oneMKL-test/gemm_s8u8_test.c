@@ -4,29 +4,22 @@
 #include <time.h>
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
-#define LOOP_COUNT 1000
+#define LOOP_COUNT 10
+
+int num_core = 1;
 const int MKL_MEM_ALIGNMENT = 64;
+FILE *file;
 
 // 测试 cblas_gemm_s8u8s32 矩阵乘法的性能，A,B矩阵都是行优先存储
-int main() {
+void test_performance(int m, int n, int k) {
   MKL_INT8 *A;
   MKL_UINT8 *B;
   MKL_INT32 *C;
-  MKL_INT m, n, k;
   MKL_INT8 oa, ob;
   MKL_INT32 oc;
   float alpha, beta;
   int i, r;
 
-  FILE *file = fopen("./build/log.txt", "a");
-  if (file == NULL) {
-    perror("cannot open file");
-    return 1;
-  }
-
-  m = MSIZE_M;
-  k = MSIZE_K;
-  n = MSIZE_N;
   oa = 0;
   ob = 0;
   oc = 0;
@@ -43,7 +36,7 @@ int main() {
     mkl_free(A);
     mkl_free(B);
     mkl_free(C);
-    return 1;
+    return;
   }
 
   // Initializing matrix data
@@ -123,15 +116,22 @@ int main() {
     );
   }
   double time_end = dsecnd();
-  double time_avg = (time_end - time_st) / LOOP_COUNT;
-  double top = (2.0 * m * n * k) * 1E-12;
-  double tops = top / time_avg;
+  double elapsed_time = time_end - time_st;
+  uint64_t mac_count = (uint64_t)m * n * k * LOOP_COUNT;
+  uint64_t ideal_mac_per_cycle = 1024 * num_core;
+  double frequency = 2.3e9;
 
-  printf("Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f tops %.5f\n", m, k,
-         n, (time_avg * 1000), tops);
+  double utilization =
+      ((double)mac_count / elapsed_time) / ideal_mac_per_cycle / frequency;
+  double TOPS = (double)mac_count * 2 * 1e-12 / elapsed_time;
+
+  printf("M N K = %5d %5d %5d, Elapsed time = %4.6f s, "
+         "Performance = %4.2f TOPS, Utilization = %3.2f%%\n",
+         m, n, k, elapsed_time, TOPS, utilization * 100);
   fprintf(file,
-          "Matrix_size(mkn) %5d %5d %5d Average_time(ms) %.5f tops %.5f\n", m,
-          k, n, (time_avg * 1000), tops);
+          "M N K = %5d %5d %5d, Elapsed time = %4.6f s, "
+          "Performance = %4.2f TOPS, Utilization = %3.2f%%\n",
+          m, n, k, elapsed_time, TOPS, utilization * 100);
 
   // Deallocating memory
   mkl_free(A);
@@ -140,7 +140,26 @@ int main() {
 
   mkl_free(packed_A);
   mkl_free(packed_B);
+}
 
+int main(int argc, char *argv[]) {
+  if (argc >= 2) {
+    num_core = atoi(argv[1]);
+  }
+  printf("Running GEMM test with %d cores!\n", num_core);
+
+  char file_name[100];
+  sprintf(file_name, "./build/gemm-i8-%dcore.txt", num_core);
+  file = fopen(file_name, "a");
+  if (file == NULL) {
+    perror("cannot open file");
+  } else {
+    for (int i = 64; i <= 16384; i += 256) {
+      test_performance(i, i, i);
+    }
+  }
   fclose(file);
+
+  // test_performance(MSIZE_M, MSIZE_N, MSIZE_K);
   return 0;
 }

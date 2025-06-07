@@ -1,3 +1,5 @@
-*.csv
-*.txt
-*.png
+**/*.csv
+**/*.txt
+**/*.png
+**/build
+amx-gemm-handwritten-bkp

@@ -50,7 +50,8 @@ public:
   }
   // 输出内联汇编代码
   void printInlineCode() const {
-    std::cout << "\".insn " << std::hex << std::setw(8) << std::setfill('0') << encode() << "\\n\\t\"";
+    std::cout << "\".insn " << std::hex << std::setw(8) << std::setfill('0')
+              << encode() << "\\n\\t\"";
     std::cout << " // ";
     printInfo();
   }
@@ -252,7 +253,6 @@ void genXTM_demo() {
     tileld.printInlineCode();
     tilest.printInlineCode();
     tdpbssd.printInlineCode();
-
   }
 }
 

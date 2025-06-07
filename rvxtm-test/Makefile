@@ -13,34 +13,46 @@ CFLAGS += -fdata-sections -ffunction-sections
 CFLAGS += $(COMMON_CFLAGS) -static
 
 LDFLAGS = -z noexecstack
-LDFLAGS += --gc-sections -e _start
+LDFLAGS += --gc-sections
 LDFLAGS += -melf64lriscv
 
 BUILD_DIR = build
-OBJ_TGT = $(BUILD_DIR)/instr-test.o
-ELF_TGT = $(BUILD_DIR)/instr-test.elf
-TXT_TGT = $(BUILD_DIR)/instr-test.txt
-BIN_TGT = $(BUILD_DIR)/instr-test.bin
+CSRCS = rvxtm-gemm.c
+BIN_TGT = $(BUILD_DIR)/rvxtm-gemm
+OBJ_TGT = $(BIN_TGT).o
+ELF_TGT = $(BIN_TGT).elf
+TXT_TGT = $(BIN_TGT).txt
 
-instr-test: $(OBJ_TGT) $(TXT_TGT) $(BIN_TGT)
+all: compile objdump
 
-$(OBJ_TGT): instr-test.c
-	@echo "Building $(OBJ_TGT)"
-	@$(CC) $(CFLAGS) -c -o $(OBJ_TGT) instr-test.c
+# $(OBJ_TGT): $(CSRCS)
+# 	@echo "Building $(OBJ_TGT)"
+# 	@mkdir -p $(BUILD_DIR)
+# 	$(CC) $(CFLAGS) -c -o $(OBJ_TGT) $(CSRCS)
+#
+# $(ELF_TGT): $(OBJ_TGT)
+# 	@echo "Building $(ELF_TGT)"
+# 	$(CC) $(LDFLAGS) -o $(ELF_TGT) $(OBJ_TGT)
+#
+# $(TXT_TGT): $(ELF_TGT)
+# 	@echo "Dumping $(ELF_TGT) to $(TXT_TGT)"
+# 	@$(OBJDUMP) -d $(ELF_TGT) > $(TXT_TGT)objdump
+#
+# $(BIN_TGT): $(ELF_TGT)
+# 	@echo "Copying $(ELF_TGT) to $(BIN_TGT)"
+# 	@$(OBJCOPY) -S -O binary -j .text $(ELF_TGT) $(BIN_TGT)
 
-$(ELF_TGT): $(OBJ_TGT)
-	@echo "Building $(ELF_TGT)"
-	@$(LD) $(LDFLAGS) -o $(ELF_TGT) $(OBJ_TGT)
 
-$(TXT_TGT): $(ELF_TGT)
-	@echo "Dumping $(ELF_TGT) to $(TXT_TGT)"
-	@$(OBJDUMP) -d $(ELF_TGT) > $(TXT_TGT)
+compile: $(CSRCS)
+	@echo "Building $(BIN_TGT)"
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $(BIN_TGT) $(CSRCS)
 
-$(BIN_TGT): $(ELF_TGT)
-	@echo "Copying $(ELF_TGT) to $(BIN_TGT)"
-	@$(OBJCOPY) -S -O binary -j .text $(ELF_TGT) $(BIN_TGT)
+objdump: $(BIN_TGT)
+	@echo "Dumping $(BIN_TGT)"
+	$(OBJDUMP) -d $(BIN_TGT) > $(BIN_TGT).s
 
 clean:
-	rm -f $(BUILD_DIR)/*
+	rm -rf $(BUILD_DIR)
 
-.PHONY: instr-test clean
+.PHONY: all compile objdump clean

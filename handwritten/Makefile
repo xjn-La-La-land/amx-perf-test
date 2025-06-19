@@ -1,6 +1,7 @@
 SRC = $(wildcard *.c)
+OBJ = $(SRC:%.c=$(BUILD_DIR)/%.o)
+DEP = $(OBJ:.o=.d)
 BUILD_DIR = build
-
 BIN = $(BUILD_DIR)/gemm-test
 
 CC = mpic++
@@ -8,29 +9,43 @@ CC = mpic++
 # CFLAGS = -O3 -march=native -fno-strict-aliasing -fopenmp
 CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
 LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+CFLAGS += -MMD -MP
+
+ifneq ($(LOOP_COUNT),)
+	CFLAGS += -DLOOP_COUNT=$(LOOP_COUNT)
+endif
+ifneq ($(TM),)
+	CFLAGS += -DTM=$(TM)
+endif
+ifneq ($(TN),)
+	CFLAGS += -DTN=$(TN)
+endif
+ifneq ($(TK),)
+	CFLAGS += -DTK=$(TK)
+endif
 
 NUM_CORE ?= 240
-CORE_LIST = $(shell seq 0 $(shell expr $(NUM_CORE) - 1))
+ifeq ($(NUM_CORE),1)
+	CORE_LIST = 1
+	core = 1
+else
+	CORE_LIST = $(shell seq 0 $(shell expr $(NUM_CORE) - 1))
+	core = 0-$(shell expr $(NUM_CORE) - 1)
+endif
 # FREQ ?= 2500000 # 2.5 GHz
 FREQ ?= 2300000 # 2.3 GHz
 # FREQ ?= 2000000 # 2.0 GHz
 # FREQ ?= 1800000 # 1.8 GHz
 # FREQ ?= 1500000 # 1.5 GHz
-ifeq ($(NUM_CORE),1)
-	core = 0
-else
-	core = 0-$(shell expr $(NUM_CORE) - 1)
-endif
 
 # open-hyper-threading!
 export KMP_AFFINITY=compact,1,0,granularity=fine
 
-PERFFLAGS = -e exe.amx_busy \
-			-e cpu-cycles
+# PERFFLAGS = -e exe.amx_busy -e cpu-cycles
 
-# PERFFLAGS = -e L1-dcache-loads,L1-dcache-load-misses \
-#             -e l2_request.all,l2_request.miss \
-# 			-e LLC-loads,LLC-load-misses \
+PERFFLAGS += -e L1-dcache-loads -e L1-dcache-load-misses
+PERFFLAGS += -e l2_request.all,l2_request.miss
+PERFFLAGS += -e LLC-loads,LLC-load-misses
 
 lockfreq:
 	for i in $(CORE_LIST); do \
@@ -61,18 +76,25 @@ enable-l1d-prefetch:
 		sudo wrmsr -p $$i $(MSR_ADDR) $$restored_val; \
 	done
 
-$(BIN): $(SRC)
-	@ mkdir -p $(BUILD_DIR)
-	$(CC) $^ $(CFLAGS) $(LDFLAGS) -o $@ 
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN): $(OBJ)
+	@mkdir -p $(dir $@)
+	$(CC) $^ $(LDFLAGS) -o $@
+
+-include $(DEP)
 
 run: $(BIN)
 	make lockfreq
-	taskset -c $(core) ./$(BIN) $(NUM_CORE)
+	taskset -c $(core) ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
 	make unlockfreq
 
 perf: $(BIN)
 	make lockfreq
-	taskset -c $(core) sudo perf stat $(PERFFLAGS) ./$(BIN) $(NUM_CORE)
+	# taskset -c $(core) sudo perf stat $(PERFFLAGS) ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
+	taskset -c $(core) sudo perf stat -d -d -d ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
 	make unlockfreq
 	
 clean:

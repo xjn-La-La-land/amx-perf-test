@@ -30,6 +30,25 @@
 #define KPACK_b16 2
 #define KPACK_b32 1
 
+// tile blocking
+#define M_STEP (MAX_ROWS * 2)
+#define N_STEP (MAX_ROWS * 2)
+#define K_STEP MAX_COLS
+
+// cache blocking
+#ifndef TM
+#define TM 1024
+#endif
+#ifndef TN
+#define TN 512
+#endif
+#ifndef TK
+#define TK 1472
+#endif
+// #define TM 1024
+// #define TN 1024
+// #define TK 1024
+
 #if !defined(likely)
 #define likely(cond) __builtin_expect(cond, 1)
 #define unlikely(cond) __builtin_expect(cond, 0)
@@ -37,6 +56,8 @@
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define ROUNDUP(x, y) (((x) + (y) - 1) / (y) * (y))
+#define ROUNDDOWN(x, y) ((x) / (y) * (y))
 
 // amx tile load/store L1
 #define amx_tile_load_L1A(dst, arr, row, col, ld)                              \
@@ -104,10 +125,10 @@ static void init_tile_config(__tilecfg *tileinfo) {
 /* Set_tiledata_use() - Invoke syscall to set ARCH_SET_STATE_USE */
 static bool set_tiledata_use() {
   if (syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA)) {
-    printf("\n Fail to do XFEATURE_XTILEDATA \n\n");
+    printf("Fail to do XFEATURE_XTILEDATA\n");
     return false;
   } else {
-    printf("\n TILE DATA USE SET - OK \n\n");
+    printf("TILE DATA USE SET - OK \n");
     return true;
   }
 
@@ -140,14 +161,21 @@ void amx_gemm_i8i8i32_naive(GEMM_PARAMS);     // dummy implementation
 void amx_gemm_i8i8i32_l0_tiling(GEMM_PARAMS); // 2A2B4C tiling
 void amx_gemm_i8i8i32_l2_tiling(GEMM_PARAMS); // L2 tiling
 
-void amx_gemm_i8i8i32_l0_tiling_packedB(GEMM_PARAMS); // 2A2B4C tiling with packed B
+void amx_gemm_i8i8i32_l0_tiling_packedB(
+    GEMM_PARAMS); // 2A2B4C tiling with packed B
 void amx_gemm_i8i8i32_l2_tiling_packedB(GEMM_PARAMS); // L2 tiling with packed B
 
-void amx_gemm_i8i8i32_l0_tiling_packedAB(GEMM_PARAMS); // 2A2B4C tiling with packed A and B
-void amx_gemm_i8i8i32_l2_tiling_packedAB(GEMM_PARAMS); // L2 tiling with packed A and B
+void amx_gemm_i8i8i32_l0_tiling_packedAB(
+    GEMM_PARAMS); // 2A2B4C tiling with packed A and B
+void amx_gemm_i8i8i32_l2_tiling_packedAB(
+    GEMM_PARAMS); // L2 tiling with packed A and B
 
-void amx_gemm_i8i8i32_l0_tiling_prefetch(GEMM_PARAMS); // 2A2B4C tiling with prefetch
-void amx_gemm_i8i8i32_l2_tiling_prefetch(GEMM_PARAMS); // L2 tiling with prefetch
+void amx_gemm_i8i8i32_l0_tiling_prefetchA(
+    GEMM_PARAMS); // 2A2B4C tiling with prefetch A
+void amx_gemm_i8i8i32_l0_tiling_prefetchAC(
+    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & C
+void amx_gemm_i8i8i32_l0_tiling_prefetchABC(
+    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & B & C
 
 void amx_init();
 void amx_packB_i8i8i32(int8_t *__restrict__ B, int8_t *__restrict__ B_packed,

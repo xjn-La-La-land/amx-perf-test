@@ -161,21 +161,17 @@ void amx_gemm_i8i8i32_naive(GEMM_PARAMS);     // dummy implementation
 void amx_gemm_i8i8i32_l0_tiling(GEMM_PARAMS); // 2A2B4C tiling
 void amx_gemm_i8i8i32_l2_tiling(GEMM_PARAMS); // L2 tiling
 
-void amx_gemm_i8i8i32_l0_tiling_packedB(
-    GEMM_PARAMS); // 2A2B4C tiling with packed B
+void amx_gemm_i8i8i32_l0_tiling_packedB(GEMM_PARAMS); // 2A2B4C tiling with packed B
 void amx_gemm_i8i8i32_l2_tiling_packedB(GEMM_PARAMS); // L2 tiling with packed B
 
-void amx_gemm_i8i8i32_l0_tiling_packedAB(
-    GEMM_PARAMS); // 2A2B4C tiling with packed A and B
-void amx_gemm_i8i8i32_l2_tiling_packedAB(
-    GEMM_PARAMS); // L2 tiling with packed A and B
+void amx_gemm_i8i8i32_l0_tiling_packedAB(GEMM_PARAMS); // 2A2B4C tiling with packed A and B
+void amx_gemm_i8i8i32_l2_tiling_packedAB(GEMM_PARAMS); // L2 tiling with packed A and B
 
-void amx_gemm_i8i8i32_l0_tiling_prefetchA(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A
-void amx_gemm_i8i8i32_l0_tiling_prefetchAC(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & C
-void amx_gemm_i8i8i32_l0_tiling_prefetchABC(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & B & C
+void amx_gemm_i8i8i32_l0_tiling_prefetchA(GEMM_PARAMS); // 2A2B4C tiling with prefetch A
+void amx_gemm_i8i8i32_l0_tiling_prefetchAC(GEMM_PARAMS); // 2A2B4C tiling with prefetch A & C
+void amx_gemm_i8i8i32_l0_tiling_prefetchABC(GEMM_PARAMS); // 2A2B4C tiling with prefetch A & B & C
+
+void amx_gemm_i8i8i32_l2_tiling_omp(GEMM_PARAMS); // L2 tiling with OpenMP parallelization
 
 void amx_init();
 void amx_packB_i8i8i32(int8_t *__restrict__ B, int8_t *__restrict__ B_packed,

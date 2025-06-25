@@ -8,6 +8,8 @@
 
 // core configuations
 int num_core = 1;
+int core_m = 1;
+int core_n = 1;
 double frequency = 2.3e9; // default frequency in Hz
 const int MKL_MEM_ALIGNMENT = 64;
 FILE *file;
@@ -15,7 +17,11 @@ bool packA, packB; // A/B packed or not
 
 // gemm API to test
 void amx_gemm_i8i8i32(GEMM_PARAMS) {
-  if (!packA && !packB) {
+  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
+  if (num_core > 1) {
+    amx_gemm_i8i8i32_l2_tiling_omp(A, B, C, M, N, K, lda, ldb, ldc);
+  }
+  else if (!packA && !packB) {
     // amx_gemm_i8i8i32_l0_tiling(A, B, C, M, N, K, lda, ldb, ldc);
     amx_gemm_i8i8i32_l2_tiling(A, B, C, M, N, K, lda, ldb, ldc);
   } else if (!packA && packB) {
@@ -119,7 +125,7 @@ void test_performance(const size_t M, const size_t N, const size_t K,
   clock_gettime(CLOCK_MONOTONIC, &end_time);
 
   uint64_t mac_count = (uint64_t)M * N * K * num_repeats;
-  uint64_t ideal_mac_per_cycle = 1024;
+  uint64_t ideal_mac_per_cycle = 1024 * num_core; // 1024 MACs per cycle per core
 
   uint64_t nanoseconds = (end_time.tv_sec - start_time.tv_sec) * 1e9 +
                          (end_time.tv_nsec - start_time.tv_nsec);
@@ -159,11 +165,34 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
   }
-  packA = true;
-  packB = true;
+  packA = packB = true;
+  switch(num_core) {
+    case 1:
+      core_m = 1; core_n = 1;
+      break;
+    case 20:
+      core_m = 5; core_n = 4;
+    case 30:
+      core_m = 6; core_n = 5;
+      break;
+    case 60:
+      core_m = 10; core_n = 6;
+      break;
+    case 120:
+      core_m = 12; core_n = 10;
+      break;
+    case 240:
+      core_m = 20; core_n = 12;
+      break;
+    default:
+      fprintf(stderr, "Unsupported number of cores: %d\n", num_core);
+      exit(EXIT_FAILURE);
+  }
+
   printf(LINE);
-  printf("Running GEMM test with %d cores, at %.2f GHz!\n", num_core,
-         frequency / 1e9);
+  printf("Running GEMM test with %d CPU Cores(%d Cores x %d Cores), at %.2f GHz!\n", 
+         num_core, core_m, core_n, frequency / 1e9);
+  
   printf("Cache Block Size: TM=%d, TN=%d, TK=%d\n", TM, TN, TK);
   printf("Matrix Layout: A - %s, B - %s\n", packA ? "packed" : "normal",
          packB ? "packed" : "normal");
@@ -183,15 +212,14 @@ int main(int argc, char *argv[]) {
     // general test
     for (int i = 64; i <= 16384; i += 64) {
       int m = i;
-      int n = ROUNDUP(i, 512);
-      int k = ROUNDUP(i, 1472);
+      int n = ROUNDUP(i, TN);
+      int k = ROUNDUP(i, TK);
       // int n = 512;
       // int k = 1472;
       test_performance(m, n, k, MKL_MEM_ALIGNMENT, LOOP_COUNT);
-      if (m * k + n * k + 4 * m * n >= 300 * 1024 * 1024) // 200MB
+      if (m * k + n * k + 4 * m * n >= 300 * 1024 * 1024) // 300MB L3
         break;
     }
-    // test_performance(32, 32, 1472, MKL_MEM_ALIGNMENT, LOOP_COUNT);
 
     // printf(LINE "test K!\n");
     // for (int k = 64; k <= 16384; k += 64) {
@@ -206,9 +234,6 @@ int main(int argc, char *argv[]) {
     //   test_performance(2048, n, 1472, MKL_MEM_ALIGNMENT, LOOP_COUNT);
     // }
 
-    // test_performance(256, 512, 1472, MKL_MEM_ALIGNMENT, LOOP_COUNT);
-    // test_performance(2048, 512, 14720, MKL_MEM_ALIGNMENT, LOOP_COUNT);
-    // test_performance(32, 512, 1472, MKL_MEM_ALIGNMENT, LOOP_COUNT);
   }
   fclose(file);
   return 0;

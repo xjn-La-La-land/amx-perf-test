@@ -4,12 +4,13 @@ DEP = $(OBJ:.o=.d)
 BUILD_DIR = build
 BIN = $(BUILD_DIR)/gemm-test
 
-CC = mpic++
-# CC = gcc
-# CFLAGS = -O3 -march=native -fno-strict-aliasing -fopenmp
-CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
-LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+# CC = mpic++
+# CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
+# LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+CC = gcc
+CFLAGS = -O3 -march=native -fopenmp -fno-strict-aliasing
 CFLAGS += -MMD -MP
+LDFLAGS = -fopenmp
 
 ifneq ($(LOOP_COUNT),)
 	CFLAGS += -DLOOP_COUNT=$(LOOP_COUNT)

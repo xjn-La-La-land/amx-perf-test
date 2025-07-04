@@ -4,16 +4,15 @@ DEP = $(OBJ:.o=.d)
 BUILD_DIR = build
 BIN = $(BUILD_DIR)/gemm-test
 
-CC = mpic++
-# CC = gcc
-# CFLAGS = -O3 -march=native -fno-strict-aliasing -fopenmp
-CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
-LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+# CC = mpic++
+# CFLAGS = -m64 -march=native -fno-strict-aliasing -O2 -DMKL_ALIGN -DMKL_LD
+# LDFLAGS = -m64 -Wl,--no-as-needed -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core -lgomp -lpthread -lm -ldl
+CC = gcc
+CFLAGS = -O3 -march=native -fopenmp -fno-strict-aliasing
 CFLAGS += -MMD -MP
+LDFLAGS = -fopenmp -lnuma
 
-ifneq ($(LOOP_COUNT),)
-	CFLAGS += -DLOOP_COUNT=$(LOOP_COUNT)
-endif
+# cache block size
 ifneq ($(TM),)
 	CFLAGS += -DTM=$(TM)
 endif
@@ -24,19 +23,38 @@ ifneq ($(TK),)
 	CFLAGS += -DTK=$(TK)
 endif
 
-NUM_CORE ?= 240
-ifeq ($(NUM_CORE),1)
-	CORE_LIST = 1
-	core = 1
-else
-	CORE_LIST = $(shell seq 0 $(shell expr $(NUM_CORE) - 1))
-	core = 0-$(shell expr $(NUM_CORE) - 1)
-endif
-# FREQ ?= 2500000 # 2.5 GHz
+core ?= 1
+
+# core = 0,1,2 => NUM_CORE = 3
+# core = 0-29  => NUM_CORE = 30
+NUM_CORE := $(shell echo $(core) | awk '\
+BEGIN{n=0} \
+{ gsub(/,/," ",$$0); \
+	for(i=1;i<=NF;i++){ \
+		if ($$i ~ /-/) { \
+		split($$i,a,"-"); n += a[2]-a[1]+1 \
+		} else {n++} \
+	} \
+	print n \
+}')
+
+# core = 0,1,2 => CORE_LIST = 0 1 2
+# core = 0-29  => CORE_LIST = 0 1 2 ... 29
+CORE_LIST := $(shell echo $(core) | awk '\
+BEGIN {OFS=" "} \
+{ gsub(/,/," ",$$0); \
+	for(i=1;i<=NF;i++){ \
+		if ($$i ~ /-/) { \
+			split($$i,a,"-"); \
+			for(j=a[1];j<=a[2];j++) printf j" " \
+		} else { printf $$i" " } \
+	} \
+}')
+
+
 FREQ ?= 2300000 # 2.3 GHz
-# FREQ ?= 2000000 # 2.0 GHz
-# FREQ ?= 1800000 # 1.8 GHz
-# FREQ ?= 1500000 # 1.5 GHz
+LOOP ?= 10      # Number of rounds to run
+
 
 # open-hyper-threading!
 export KMP_AFFINITY=compact,1,0,granularity=fine
@@ -88,14 +106,36 @@ $(BIN): $(OBJ)
 
 run: $(BIN)
 	make lockfreq
-	taskset -c $(core) ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
+	taskset -c $(core) ./$(BIN) -c $(NUM_CORE) -f $(FREQ) -r $(LOOP)
 	make unlockfreq
 
 perf: $(BIN)
 	make lockfreq
-	# taskset -c $(core) sudo perf stat $(PERFFLAGS) ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
-	taskset -c $(core) sudo perf stat -d -d -d ./$(BIN) -c $(NUM_CORE) -f $(FREQ)
+	# taskset -c $(core) sudo perf stat $(PERFFLAGS) ./$(BIN) -c $(NUM_CORE) -f $(FREQ) -r $(LOOP)
+	taskset -c $(core) sudo perf stat -d -d -d ./$(BIN) -c $(NUM_CORE) -f $(FREQ) -r $(LOOP)
 	make unlockfreq
+
+
+run-1-node: $(BIN)
+	# node 0
+	make lockfreq core="0-29"
+	numactl --cpunodebind=0 --membind=0 ./$(BIN) \
+	-n 1 -f $(FREQ) -r $(LOOP)
+	make unlockfreq core="0-29"
+
+run-2-node: $(BIN)
+	# node 0,1
+	make lockfreq core="0-59"
+	numactl --cpunodebind=0,1 --membind=0,1 ./$(BIN) \
+	-n 2 -f $(FREQ) -r $(LOOP)
+	make unlockfreq core="0-59"
+	
+run-4-node: $(BIN)
+	# node = 0,1,2,3
+	make lockfreq core="0-119"
+	numactl --cpunodebind=0,1,2,3 --membind=0,1,2,3 ./$(BIN) \
+	-n 4 -f $(FREQ) -r $(LOOP)
+	make unlockfreq core="0-119"
 	
 clean:
 	rm -rf $(BUILD_DIR)

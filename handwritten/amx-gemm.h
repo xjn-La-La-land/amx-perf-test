@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 #include <immintrin.h>
+#include <numa.h>
 #include <omp.h>
 #include <sched.h>
 #include <stdbool.h>
@@ -23,6 +24,8 @@
 #define XFEATURE_XTILECFG 17
 #define XFEATURE_XTILEDATA 18
 
+#define MEM_ALIGNMENT 64
+
 #define OFFSET2D(x, y, ld) ((x) * (ld) + (y))
 #define OFFSET3D(x, y, z, ld1, ld2) ((x) * (ld1) * (ld2) + (y) * (ld2) + (z))
 
@@ -37,7 +40,7 @@
 
 // cache blocking
 #ifndef TM
-#define TM 1024
+#define TM 512
 #endif
 #ifndef TN
 #define TN 512
@@ -56,8 +59,46 @@
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define CEIL(x, y) (((x) + (y) - 1) / (y))
 #define ROUNDUP(x, y) (((x) + (y) - 1) / (y) * (y))
 #define ROUNDDOWN(x, y) ((x) / (y) * (y))
+
+// GEMM configurations
+typedef struct {
+  bool use_numa; // whether to use NUMA-aware parallelization
+  int num_node;  // number of NUMA nodes
+  int num_core;  // number of CPU cores
+
+  bool packA;       // whether to pack matrix A
+  bool packB;       // whether to pack matrix B
+  int prefetch;     // prefetching strategy
+  int omp_parallel; // OpenMP parallelization ctrl
+
+  double frequency; // CPU frequency in Hz
+  int loop_count;   // number of loops for performance test
+} gemm_config_t;
+
+#define NUM_CORE_PER_NODE                                                      \
+  30 // number of CPU cores per numa node (physical core)
+
+#define PFETCH_NONE 0
+#define PFETCH_A 1
+#define PFETCH_AC 2
+#define PFETCH_ABC 3
+
+#define OMP_AUTO 0
+#define OMP_MANUAL 1
+
+#define DEFAULT_GEMM_CONFIG                                                    \
+  {                                                                            \
+      .use_numa = false,                                                       \
+      .packA = true,                                                           \
+      .packB = true,                                                           \
+      .prefetch = PFETCH_AC,                                                   \
+      .omp_parallel = OMP_MANUAL,                                              \
+      .frequency = 2.3e9, /* default frequency 2.3GHz */                       \
+      .loop_count = 10,                                                        \
+  }
 
 // amx tile load/store L1
 #define amx_tile_load_L1A(dst, arr, row, col, ld)                              \
@@ -135,10 +176,27 @@ static bool set_tiledata_use() {
   return true;
 }
 
+// bind the current thread to a specific CPU core
+// `cpu_id`: the CPU core ID to bind to
 static void bind_thread_to_cpu(int cpu_id) {
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(cpu_id, &cpuset);
+
+  if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
+    perror("sched_setaffinity");
+  }
+}
+
+// bind the current thread to a specific NUMA node
+// `node_id`: the NUMA node ID to bind to
+static void bind_thread_to_numa_node(int node_id) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+
+  for (int i = 0; i < NUM_CORE_PER_NODE; i++) {
+    CPU_SET(node_id * NUM_CORE_PER_NODE + i, &cpuset);
+  }
 
   if (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) != 0) {
     perror("sched_setaffinity");
@@ -152,35 +210,55 @@ static void bind_thread_to_cpu(int cpu_id) {
 //     B: [K/KPACK, N*KPACK] array, where KPACK = (4/sizeof(type_t))
 // output:
 //     C: [M, N] array
-#define GEMM_PARAMS                                                            \
+#define GEMM_PARAMS_I8                                                         \
   int8_t *__restrict__ A, int8_t *__restrict__ B, int32_t *__restrict__ C,     \
       const int M, const int N, const int K, const int lda, const int ldb,     \
       const int ldc
-void cpu_gemm_i8i8i32(GEMM_PARAMS);           // 3 nested loops with no amx
-void amx_gemm_i8i8i32_naive(GEMM_PARAMS);     // dummy implementation
-void amx_gemm_i8i8i32_l0_tiling(GEMM_PARAMS); // 2A2B4C tiling
-void amx_gemm_i8i8i32_l2_tiling(GEMM_PARAMS); // L2 tiling
+void cpu_gemm_i8(GEMM_PARAMS_I8);           // 3 nested loops with no amx
+void amx_gemm_i8_naive(GEMM_PARAMS_I8);     // dummy implementation
+void amx_gemm_i8_l0_tiling(GEMM_PARAMS_I8); // 2A2B4C tiling
+void amx_gemm_i8_l2_tiling(GEMM_PARAMS_I8); // L2 tiling
 
-void amx_gemm_i8i8i32_l0_tiling_packedB(
-    GEMM_PARAMS); // 2A2B4C tiling with packed B
-void amx_gemm_i8i8i32_l2_tiling_packedB(GEMM_PARAMS); // L2 tiling with packed B
+void amx_gemm_i8_l0_tiling_packedB(
+    GEMM_PARAMS_I8); // 2A2B4C tiling with packed B
+void amx_gemm_i8_l2_tiling_packedB(GEMM_PARAMS_I8); // L2 tiling with packed B
 
-void amx_gemm_i8i8i32_l0_tiling_packedAB(
-    GEMM_PARAMS); // 2A2B4C tiling with packed A and B
-void amx_gemm_i8i8i32_l2_tiling_packedAB(
-    GEMM_PARAMS); // L2 tiling with packed A and B
+void amx_gemm_i8_l0_tiling_packedAB(
+    GEMM_PARAMS_I8); // 2A2B4C tiling with packed A and B
+void amx_gemm_i8_l2_tiling_packedAB(
+    GEMM_PARAMS_I8); // L2 tiling with packed A and B
 
-void amx_gemm_i8i8i32_l0_tiling_prefetchA(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A
-void amx_gemm_i8i8i32_l0_tiling_prefetchAC(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & C
-void amx_gemm_i8i8i32_l0_tiling_prefetchABC(
-    GEMM_PARAMS); // 2A2B4C tiling with prefetch A & B & C
+void amx_gemm_i8_l0_tiling_prefetchA(
+    GEMM_PARAMS_I8); // 2A2B4C tiling with prefetch A
+void amx_gemm_i8_l0_tiling_prefetchAC(
+    GEMM_PARAMS_I8); // 2A2B4C tiling with prefetch A & C
+void amx_gemm_i8_l0_tiling_prefetchABC(
+    GEMM_PARAMS_I8); // 2A2B4C tiling with prefetch A & B & C
+
+void amx_gemm_i8_l2_tiling_omp(
+    GEMM_PARAMS_I8); // L2 tiling with OpenMP parallelization
+
+#define GEMM_PARAMS_I8_NUMA                                                    \
+  int8_t **__restrict__ A_nodes, int8_t **__restrict__ B_nodes,                \
+      int32_t **__restrict__ C_nodes, const int M, const int N, const int K,   \
+      const int lda, const int ldb, const int ldc
+
+void amx_gemm_i8_l2_tiling_numa(
+    GEMM_PARAMS_I8_NUMA); // L2 tiling with NUMA-aware parallelization
+
+// Top level APIs
+
+#define GEMM_PARAMS                                                            \
+  void *__restrict__ A, void *__restrict__ B, void *__restrict__ C,            \
+      const int M, const int N, const int K, const int lda, const int ldb,     \
+      const int ldc
 
 void amx_init();
-void amx_packB_i8i8i32(int8_t *__restrict__ B, int8_t *__restrict__ B_packed,
-                       const int N, const int K);
-void amx_packBtile_i8i8i32(int8_t *pB0, int8_t *pB1, int ldb);
-void amx_packA_i8i8i32(int8_t *__restrict__ A, int8_t *__restrict__ A_packed,
-                       const int M, const int K);
-void amx_packAtile_i8i8i32(int8_t *pA0, int8_t *pA1, int lda);
+void *amx_packA_i8(int8_t *__restrict__ A, const int M, const int K);
+void *amx_packB_i8(int8_t *__restrict__ B, const int N, const int K);
+void *amx_reallocC_i8(int32_t *__restrict__ C, int M, int N);
+void amx_copyC_i8(int32_t *__restrict__ C, void *C1, const int M, const int N);
+void amx_gemm_i8(GEMM_PARAMS);
+void amx_packA_free(void *A_packed, int M, int K);
+void amx_packB_free(void *B_packed, int N, int K);
+void amx_reallocC_free(void *C_nodes, int M, int N);

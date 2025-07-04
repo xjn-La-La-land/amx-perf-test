@@ -4,7 +4,10 @@
 #include <time.h>
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
+#ifndef LOOP_COUNT
 #define LOOP_COUNT 10
+#endif
+#define ROUNDUP(x, y) (((x) + (y) - 1) / (y) * (y))
 
 int num_core = 1;
 const int MKL_MEM_ALIGNMENT = 64;
@@ -148,15 +151,23 @@ int main(int argc, char *argv[]) {
   }
   printf("Running GEMM test with %d cores!\n", num_core);
 
-  char file_name[100];
-  sprintf(file_name, "./build/gemm-i8-%dcore.txt", num_core);
+  char file_name[64];
+  sprintf(file_name, "./gemm-i8-%dcore.txt", num_core);
   file = fopen(file_name, "a");
   if (file == NULL) {
     perror("cannot open file");
   } else {
-    for (int i = 64; i <= 16384; i += 256) {
-      test_performance(i, i, i);
+    for (int i = 256; i <= 32768; i += 256) {
+      int m = 6144;
+      int n = 5120;
+      int k = i;
+      // int m = ROUNDUP(i, 512);
+      // int n = ROUNDUP(i, 512);
+      // int k = ROUNDUP(i, 1472);
+      test_performance(m, n, k);
     }
+
+    // test_performance(16128, 16128, 16128);
   }
   fclose(file);
 

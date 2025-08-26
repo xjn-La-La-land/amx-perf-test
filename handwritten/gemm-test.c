@@ -104,9 +104,9 @@ void test_performance(const size_t M, const size_t N, const size_t K) {
                        ideal_mac_per_cycle / gemm_config.frequency;
   double TOPS = (double)mac_count * 2 / 1e12 / elapsed_time;
 
-  printf("M N K = %5ld %5ld %5ld, "
-         "Performance = %6.2f TOPS, Utilization = %5.2f%%\n",
-         M, N, K, TOPS, utilization * 100);
+  printf("M N K = %5ld %5ld %5ld, Elapsed time = %4.6f s, "
+         "Performance = %4.2f TOPS, Utilization = %3.2f%%\n",
+         M, N, K, elapsed_time, TOPS, utilization * 100);
   // fprintf(file,
   //         "M N K = %5ld %5ld %5ld, Elapsed time = %10.6f s, "
   //         "Performance = %6.2f TOPS, Utilization = %5.2f%%\n",
@@ -194,8 +194,8 @@ int main(int argc, char *argv[]) {
     int m = ROUNDUP(i, TM);
     int n = ROUNDUP(i, TN);
     int k = ROUNDUP(i, TK);
-    // int m = 12288;
-    // int n = 10240;
+    // int m = 6144;
+    // int n = 5120;
     // int k = i;
     test_performance(m, n, k);
     // if (m * k + n * k + 4 * m * n >= 300 * 1024 * 1024) // 300MB L3

@@ -14,27 +14,27 @@ if [ ! -f "$input_file" ]; then
   exit 1
 fi
 
-matrix_sz=()
+perf=()
 utils=()
 
 # 逐行读取文件
 while read -r line; do
   if [[ "$line" == M\ N\ K* ]]; then
-    # 提取 M（假设 M=N=K）
-    m=$(echo "$line" | awk '{print $5}')
+    # 提取 TOPS
+    tops=$(echo "$line" | grep -o 'Performance = [ 0-9.]\+ TOPS' | awk '{print $3}')
     # 提取 Utilization 百分比
-    util=$(echo "$line" | grep -o 'Utilization = [0-9.]\+%' | awk '{print $3}' | tr -d '%')
+    util=$(echo "$line" | grep -o 'Utilization = [ 0-9.]\+%' | awk '{print $3}' | tr -d '%')
 
-    matrix_sz+=($m)
+    perf+=($tops)
     utils+=($util)
   fi
 done <"$input_file"
 
 # 输出 Python 格式数组
-echo -n "matrix_sz = ["
-printf "%s" "${matrix_sz[0]}"
-for ((i = 1; i < ${#matrix_sz[@]}; i++)); do
-  printf ", %s" "${matrix_sz[i]}"
+echo -n "tops = ["
+printf "%s" "${perf[0]}"
+for ((i = 1; i < ${#perf[@]}; i++)); do
+  printf ", %s" "${perf[i]}"
 done
 echo "]"
 

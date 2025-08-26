@@ -446,7 +446,7 @@ struct GemmKernel224BF {
 
     void from_mat(int m, ggml_bf16_t *src, int ith, int nth) {
       assert(m <= max_m);
-      assert(ith == 0 && nth == 1);
+      assert(ith == 0 && nth == 1); // single thread for repacking A
       int m_block_size = (m + M_STEP - 1) / M_STEP * M_STEP;
       for (int m_begin = 0; m_begin < m; m_begin += M_STEP) {
         for (int k_block_begin = 0; k_block_begin < k;
@@ -494,7 +494,7 @@ struct GemmKernel224BF {
     void from_mat(ggml_bf16_t *src, int ith, int nth) {
       auto [n_start, n_end] = split_range_n(n, ith, nth);
       int n_block_begin = n_start;
-      int n_block_size = n_end - n_block_begin;
+      int n_block_size = n_end - n_start;
       for (int n_begin = 0; n_begin < n_block_size; n_begin += N_STEP) {
         for (int k_block_begin = 0; k_block_begin < k;
              k_block_begin += K_BLOCK) {
@@ -583,6 +583,165 @@ struct GemmKernel224BF {
     }
   };
 };
+
+inline void mat_mul(int m, int n, int k,
+                    std::shared_ptr<GemmKernel224BF::BufferA> ba,
+                    std::shared_ptr<GemmKernel224BF::BufferB> bb,
+                    std::shared_ptr<GemmKernel224BF::BufferC> bc, int ith,
+                    int nth, bool use_amx) {
+  using K = GemmKernel224BF;
+  assert(n % K::N_STEP == 0);
+  assert(k % K::K_STEP == 0);
+
+  auto [n_start, n_end] = K::split_range_n(n, ith, nth);
+
+  for (int k_block_begin = 0; k_block_begin < k; k_block_begin += K::K_BLOCK) {
+    for (int m_begin = 0; m_begin < m; m_begin += K::M_STEP) {
+      for (int n_begin = n_start; n_begin < n_end; n_begin += K::N_STEP) {
+
+        float *c = bc->get_submat(m, n, m_begin, n_begin);
+        if (!use_amx) {
+          __m512 *c512 = (__m512 *)c;
+          if (k_block_begin == 0) {
+            for (int m_i = 0; m_i < m; m_i++) {
+              c512[m_i * 2] = _mm512_setzero_ps();
+              c512[m_i * 2 + 1] = _mm512_setzero_ps();
+            }
+          }
+
+          for (int k_begin = 0;
+               k_begin < K::K_BLOCK && k_block_begin + k_begin < k;
+               k_begin += K::K_STEP) {
+            int32_t *a32 = (int32_t *)ba->get_submat(m, k, m_begin,
+                                                     k_block_begin + k_begin);
+            __m512bh *b512 = (__m512bh *)bb->get_submat(
+                n, k, n_begin, k_block_begin + k_begin);
+            for (int m_i = 0; m_i < m; m_i++) {
+              for (int k_i = 0; k_i < 16; k_i++) {
+                __m512bh ma = (__m512bh)_mm512_set1_epi32(a32[m_i * 16 + k_i]);
+                for (int n_i = 0; n_i < 2; n_i++) {
+                  c512[m_i * 2 + n_i] = _mm512_dpbf16_ps(
+                      c512[m_i * 2 + n_i], ma, b512[n_i * 16 + k_i]);
+                }
+              }
+            }
+          }
+
+        } else {
+          if (k_block_begin == 0) {
+            K::clean_c();
+          } else {
+            K::load_c(c, K::N_STEP * sizeof(float));
+          }
+          for (int k_begin = 0;
+               k_begin < K::K_BLOCK && k_block_begin + k_begin < k;
+               k_begin += K::K_STEP) {
+            K::load_a(ba->get_submat(m, k, m_begin, k_block_begin + k_begin),
+                      K::K_STEP * sizeof(ggml_bf16_t));
+            K::load_b(bb->get_submat(n, k, n_begin, k_block_begin + k_begin),
+                      K::K_STEP * sizeof(ggml_bf16_t));
+            K::run_tile();
+          }
+          K::store_c(c, K::N_STEP * sizeof(float));
+        }
+      }
+    }
+  }
+}
+
+struct GemmHandwrittenBF16 {
+  using K = GemmKernel224BF;
+  ggml_bf16_t *A, *B, *C; // input and output matrices
+  int m, n, k;            // dimensions of the matrices
+  int num_threads;        // number of threads to use
+
+  GemmHandwrittenBF16(ggml_bf16_t *A, ggml_bf16_t *B, ggml_bf16_t *C, int m,
+                      int n, int k, int num_threads = 1)
+      : A(A), B(B), C(C), m(m), n(n), k(k), num_threads(num_threads) {
+    assert(m > 0 && n > 0 && k > 0);
+    assert(reinterpret_cast<intptr_t>(A) % 64 == 0);
+    assert(reinterpret_cast<intptr_t>(B) % 64 == 0);
+    assert(reinterpret_cast<intptr_t>(C) % 64 == 0);
+    assert(num_threads > 0);
+
+    gemm_init(); // assign buffers and config kernel
+  }
+
+  // buffers for the packed A/B/C matrices
+  std::shared_ptr<K::BufferA> ba;
+  std::shared_ptr<K::BufferB> bb;
+  std::shared_ptr<K::BufferC> bc;
+  void *ptr_a, *ptr_b, *ptr_c;
+
+  void gemm_init() {
+    ptr_a = aligned_alloc(64, K::BufferA::required_size(m, k));
+    ptr_b = aligned_alloc(64, K::BufferB::required_size(n, k));
+    ptr_c = aligned_alloc(64, K::BufferC::required_size(m, n));
+    assert(ptr_a != nullptr && ptr_b != nullptr && ptr_c != nullptr);
+    ba = std::make_shared<K::BufferA>(m, k, ptr_a);
+    bb = std::make_shared<K::BufferB>(n, k, ptr_b);
+    bc = std::make_shared<K::BufferC>(m, n, ptr_c);
+    K::config();
+  }
+
+  void pack_input() {
+    // A矩阵只需要打包一次（所有线程共享）
+    ba->from_mat(m, A, 0, 1);
+
+    // B矩阵按N维度分块，多线程并行打包
+    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
+
+#pragma omp parallel for num_threads(num_threads)
+    for (int i_th = 0; i_th < num_n_block; i_th++) {
+      bb->from_mat(B, i_th, num_threads);
+    }
+  }
+
+  void compute() {
+    const bool use_amx = true;
+    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
+
+#pragma omp parallel for num_threads(num_threads)
+    for (int i_th = 0; i_th < num_n_block; i_th++) {
+      mat_mul(m, n, k, ba, bb, bc, i_th, num_threads, use_amx);
+    }
+  }
+
+  void unpack_output() {
+    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
+
+#pragma omp parallel for num_threads(num_threads)
+    for (int i_th = 0; i_th < num_n_block; i_th++) {
+      bc->to_mat(m, C, i_th, num_threads);
+    }
+  }
+
+  void gemm_run() {
+    pack_input();
+    compute();
+    unpack_output();
+    gemm_free();
+  }
+
+  void gemm_free() {
+    if (ptr_a) {
+      free(ptr_a);
+      ptr_a = nullptr;
+    }
+    if (ptr_b) {
+      free(ptr_b);
+      ptr_b = nullptr;
+    }
+    if (ptr_c) {
+      free(ptr_c);
+      ptr_c = nullptr;
+    }
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////
+// int8 version
+///////////////////////////////////////////////////////////////////////////
 
 struct GemmKernel224Int8 {
   using dt = int8_t;
@@ -898,71 +1057,6 @@ struct GemmKernel224Int8 {
   };
 };
 
-inline void mat_mul(int m, int n, int k,
-                    std::shared_ptr<GemmKernel224BF::BufferA> ba,
-                    std::shared_ptr<GemmKernel224BF::BufferB> bb,
-                    std::shared_ptr<GemmKernel224BF::BufferC> bc, int ith,
-                    int nth, bool use_amx) {
-  using K = GemmKernel224BF;
-  assert(n % K::N_STEP == 0);
-  assert(k % K::K_STEP == 0);
-
-  auto [n_start, n_end] = K::split_range_n(n, ith, nth);
-
-  for (int k_block_begin = 0; k_block_begin < k; k_block_begin += K::K_BLOCK) {
-    for (int m_begin = 0; m_begin < m; m_begin += K::M_STEP) {
-      for (int n_begin = n_start; n_begin < n_end; n_begin += K::N_STEP) {
-
-        float *c = bc->get_submat(m, n, m_begin, n_begin);
-        if (!use_amx) {
-          __m512 *c512 = (__m512 *)c;
-          if (k_block_begin == 0) {
-            for (int m_i = 0; m_i < m; m_i++) {
-              c512[m_i * 2] = _mm512_setzero_ps();
-              c512[m_i * 2 + 1] = _mm512_setzero_ps();
-            }
-          }
-
-          for (int k_begin = 0;
-               k_begin < K::K_BLOCK && k_block_begin + k_begin < k;
-               k_begin += K::K_STEP) {
-            int32_t *a32 = (int32_t *)ba->get_submat(m, k, m_begin,
-                                                     k_block_begin + k_begin);
-            __m512bh *b512 = (__m512bh *)bb->get_submat(
-                n, k, n_begin, k_block_begin + k_begin);
-            for (int m_i = 0; m_i < m; m_i++) {
-              for (int k_i = 0; k_i < 16; k_i++) {
-                __m512bh ma = (__m512bh)_mm512_set1_epi32(a32[m_i * 16 + k_i]);
-                for (int n_i = 0; n_i < 2; n_i++) {
-                  c512[m_i * 2 + n_i] = _mm512_dpbf16_ps(
-                      c512[m_i * 2 + n_i], ma, b512[n_i * 16 + k_i]);
-                }
-              }
-            }
-          }
-
-        } else {
-          if (k_block_begin == 0) {
-            K::clean_c();
-          } else {
-            K::load_c(c, K::N_STEP * sizeof(float));
-          }
-          for (int k_begin = 0;
-               k_begin < K::K_BLOCK && k_block_begin + k_begin < k;
-               k_begin += K::K_STEP) {
-            K::load_a(ba->get_submat(m, k, m_begin, k_block_begin + k_begin),
-                      K::K_STEP * sizeof(ggml_bf16_t));
-            K::load_b(bb->get_submat(n, k, n_begin, k_block_begin + k_begin),
-                      K::K_STEP * sizeof(ggml_bf16_t));
-            K::run_tile();
-          }
-          K::store_c(c, K::N_STEP * sizeof(float));
-        }
-      }
-    }
-  }
-}
-
 inline __m512i _mm512_dpbssd_epi32(__m512i src, __m512i a, __m512i b) {
   __m256i a_lo = _mm512_extracti64x4_epi64(a, 0);
   __m256i a_hi = _mm512_extracti64x4_epi64(a, 1);
@@ -1066,122 +1160,5 @@ inline void mat_mul(int m, int n, int k,
     }
   }
 }
-
-void gemm_int8_handwritten(ggml_bf16_t *__restrict__ A,
-                           ggml_bf16_t *__restrict__ B,
-                           ggml_bf16_t *__restrict__ C, const int m,
-                           const int n, const int k) {
-  assert(m > 0 && n > 0 && k > 0);
-
-  using K = GemmKernel224Int8;
-  std::shared_ptr<K::BufferA> ba;
-  std::shared_ptr<K::BufferB> bb;
-  std::shared_ptr<K::BufferC> bc;
-
-  void *ptr_a = aligned_alloc(64, K::BufferA::required_size(m, k));
-  void *ptr_b = aligned_alloc(64, K::BufferB::required_size(n, k));
-  void *ptr_c = aligned_alloc(64, K::BufferC::required_size(m, n));
-  assert(ptr_a != nullptr && ptr_b != nullptr && ptr_c != nullptr);
-  ba = std::make_shared<K::BufferA>(m, k, ptr_a);
-  bb = std::make_shared<K::BufferB>(n, k, ptr_b);
-  bc = std::make_shared<K::BufferC>(m, n, ptr_c);
-  K::config();
-
-  bool use_amx = true;
-  int n_th = 1;
-  int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
-  for (int i_th = 0; i_th < num_n_block; i_th++) {
-    if (i_th == 0) {
-      ba->from_mat(m, A, 0, n_th);
-    }
-    bb->from_mat(B, i_th, n_th);
-    mat_mul(m, n, k, ba, bb, bc, i_th, n_th, use_amx);
-    bc->to_mat(m, C, i_th, n_th);
-  }
-
-  free(ptr_a);
-  free(ptr_b);
-  free(ptr_c);
-}
-
-struct GemmHandwrittenBF16 {
-  using K = GemmKernel224BF;
-  ggml_bf16_t *A, *B, *C; // input and output matrices
-  int m, n, k;            // dimensions of the matrices
-
-  GemmHandwrittenBF16(ggml_bf16_t *A, ggml_bf16_t *B, ggml_bf16_t *C, int m,
-                      int n, int k)
-      : A(A), B(B), C(C), m(m), n(n), k(k) {
-    assert(m > 0 && n > 0 && k > 0);
-    assert(reinterpret_cast<intptr_t>(A) % 64 == 0);
-    assert(reinterpret_cast<intptr_t>(B) % 64 == 0);
-    assert(reinterpret_cast<intptr_t>(C) % 64 == 0);
-  }
-
-  std::shared_ptr<K::BufferA> ba;
-  std::shared_ptr<K::BufferB> bb;
-  std::shared_ptr<K::BufferC> bc;
-  void *ptr_a, *ptr_b, *ptr_c;
-
-  void gemm_init() {
-    ptr_a = aligned_alloc(64, K::BufferA::required_size(m, k));
-    ptr_b = aligned_alloc(64, K::BufferB::required_size(n, k));
-    ptr_c = aligned_alloc(64, K::BufferC::required_size(m, n));
-    assert(ptr_a != nullptr && ptr_b != nullptr && ptr_c != nullptr);
-    ba = std::make_shared<K::BufferA>(m, k, ptr_a);
-    bb = std::make_shared<K::BufferB>(n, k, ptr_b);
-    bc = std::make_shared<K::BufferC>(m, n, ptr_c);
-    K::config();
-  }
-
-  void pack_input() {
-    gemm_init(); // assign buffers
-
-    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
-    for (int i_th = 0; i_th < num_n_block; i_th++) {
-      if (i_th == 0) {
-        ba->from_mat(m, A, 0, 1);
-      }
-      bb->from_mat(B, i_th, 1);
-    }
-  }
-
-  void compute() {
-    bool use_amx = true;
-    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
-    for (int i_th = 0; i_th < num_n_block; i_th++) {
-      mat_mul(m, n, k, ba, bb, bc, i_th, 1, use_amx);
-    }
-  }
-
-  void unpack_output() {
-    int num_n_block = (n + K::N_BLOCK - 1) / K::N_BLOCK;
-    for (int i_th = 0; i_th < num_n_block; i_th++) {
-      bc->to_mat(m, C, i_th, 1);
-    }
-  }
-
-  void gemm_run() {
-    pack_input();
-    compute();
-    unpack_output();
-    gemm_free();
-  }
-
-  void gemm_free() {
-    if (ptr_a) {
-      free(ptr_a);
-      ptr_a = nullptr;
-    }
-    if (ptr_b) {
-      free(ptr_b);
-      ptr_b = nullptr;
-    }
-    if (ptr_c) {
-      free(ptr_c);
-      ptr_c = nullptr;
-    }
-  }
-};
 
 } // namespace amx

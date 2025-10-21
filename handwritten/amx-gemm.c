@@ -64,32 +64,6 @@ void amx_gemm_i8_l0_tiling(GEMM_PARAMS_I8) {
   }
 }
 
-// L2 tiling
-void amx_gemm_i8_l2_tiling(GEMM_PARAMS_I8) {
-  // for (int tm = 0; tm < M; tm += TM) {
-  //   for (int tn = 0; tn < N; tn += TN) {
-  //     for (int tk = 0; tk < K; tk += TK) {
-  //       amx_gemm_i8_l0_tiling(
-  //           &A[OFFSET2D(tm, tk, lda)],
-  //           &B[OFFSET2D(tk / KPACK_b8, tn * KPACK_b8, ldb * KPACK_b8)],
-  //           &C[OFFSET2D(tm, tn, ldc)], MIN(M - tm, TM), MIN(N - tn, TN),
-  //           MIN(K - tk, TK), lda, ldb, ldc);
-  //     }
-  //   }
-  // }
-
-  // 对 M 似乎不需要分块？
-  for (int tn = 0; tn < N; tn += TN) {
-    for (int tk = 0; tk < K; tk += TK) {
-      amx_gemm_i8_l0_tiling(
-          &A[OFFSET2D(0, tk, lda)],
-          &B[OFFSET2D(tk / KPACK_b8, tn * KPACK_b8, ldb * KPACK_b8)],
-          &C[OFFSET2D(0, tn, ldc)], M, MIN(N - tn, TN), MIN(K - tk, TK), lda,
-          ldb, ldc);
-    }
-  }
-}
-
 // l0 tiling with packed B
 void amx_gemm_i8_l0_tiling_packedB(GEMM_PARAMS_I8) {
   assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
@@ -123,19 +97,104 @@ void amx_gemm_i8_l0_tiling_packedB(GEMM_PARAMS_I8) {
   }
 }
 
-// l2 tiling with packed B
-void amx_gemm_i8_l2_tiling_packedB(GEMM_PARAMS_I8) {
-  // for (int tm = 0; tm < M; tm += TM) {
-  //   for (int tn = 0; tn < N; tn += TN) {
-  //     for (int tk = 0; tk < K; tk += TK) {
-  //       amx_gemm_i8_l0_tiling_packedB(
-  //           &A[OFFSET2D(tm, tk, lda)],
-  //           B + tn * K + tk * MIN(N - tn, TN), // packedB block address
-  //           &C[OFFSET2D(tm, tn, ldc)], MIN(M - tm, TM), MIN(N - tn, TN),
-  //           MIN(K - tk, TK), lda, ldb, ldc);
-  //     }
-  //   }
-  // }
+
+
+#define CACHELINE 64
+
+// l0 tiling with packed A & B, prefetch options: A/C data => l1d, B => l2
+void amx_gemm_i8_l0_tiling_packedAB(GEMM_PARAMS_I8) {
+  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
+
+#if defined(PFETCH_B)
+  int8_t *pB_pf = B + N * K; // prefetch address for B
+#endif
+  for (int i = 0; i < M; i += M_STEP) {
+    int8_t *pB = B;                       // packed B block address
+#if defined(PFETCH_A)
+    int8_t *pA_pf = A + (i + M_STEP) * K; // prefetch address for A
+#endif
+    for (int j = 0; j < N; j += N_STEP) {
+      amx_tile_load_L2C(0, C, i, j, ldc);
+      amx_tile_load_L2C(1, C, i, j + MAX_ROWS, ldc);
+      amx_tile_load_L2C(2, C, i + MAX_ROWS, j, ldc);
+      amx_tile_load_L2C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
+
+      int8_t *pA = A + i * K; // packed A block address
+#if defined(PFETCH_C)
+      int8_t *pC_pf =
+          (int8_t *)((j + N_STEP <= N)
+                         ? &C[OFFSET2D(i, j + N_STEP, ldc)]
+                         : &C[OFFSET2D(i + M_STEP, 0,
+                                       ldc)]); // prefetch address for C
+      int pfC_cnt = 0;
+#endif
+
+// GEMM core loop
+#pragma unroll 32
+      for (int k = 0; k < K; k += K_STEP) {
+        _tile_stream_loadd(6, pB, MIN_STRIDE);
+        pB += TILE_SIZE; // tileload B0
+        _tile_loadd(4, pA, MIN_STRIDE);
+        pA += TILE_SIZE; // tileload A0
+        _tile_stream_loadd(7, pB, MIN_STRIDE);
+        pB += TILE_SIZE; // tileload B1
+        _tile_loadd(5, pA, MIN_STRIDE);
+        pA += TILE_SIZE;       // tileload A1
+        _tile_dpbssd(0, 4, 6); // tdp A0, B0
+        _tile_dpbssd(1, 4, 7); // tdp A0, B1
+        _tile_dpbssd(2, 5, 6); // tdp A1, B0
+        _tile_dpbssd(3, 5, 7); // tdp A1, B1
+
+#if defined(PFETCH_A) // prefetch A
+        _mm_prefetch(pA_pf, _MM_HINT_T1);
+        pA_pf += CACHELINE;
+        _mm_prefetch(pA_pf, _MM_HINT_T1);
+        pA_pf += CACHELINE;
+#endif
+#if defined(PFETCH_B) // prefetch B
+        if (likely(pB_pf < B + 2 * N * K)) {
+          _mm_prefetch(pB_pf, _MM_HINT_T2);
+          pB_pf += CACHELINE;
+          _mm_prefetch(pB_pf, _MM_HINT_T2);
+          pB_pf += CACHELINE;
+        }
+#endif
+#if defined(PFETCH_C) // prefetch C
+        if (likely(pfC_cnt < 4096 / CACHELINE)) { //  prefetch C
+          _mm_prefetch(pC_pf, _MM_HINT_T1);
+          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
+          pC_pf += ldc * sizeof(int32_t); // move to next row
+          _mm_prefetch(pC_pf, _MM_HINT_T1);
+          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
+          pC_pf += ldc * sizeof(int32_t); // move to next row
+          pfC_cnt += 4;
+        }
+#endif
+      }
+      amx_tile_store_L1C(0, C, i, j, ldc);
+      amx_tile_store_L1C(1, C, i, j + MAX_ROWS, ldc);
+      amx_tile_store_L1C(2, C, i + MAX_ROWS, j, ldc);
+      amx_tile_store_L1C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
+    }
+  }
+}
+
+// L2 blocking
+void amx_gemm_i8_l2_blocking(GEMM_PARAMS_I8) {
+  // 在 M 方向不需要分块
+  for (int tn = 0; tn < N; tn += TN) {
+    for (int tk = 0; tk < K; tk += TK) {
+      amx_gemm_i8_l0_tiling(
+          &A[OFFSET2D(0, tk, lda)],
+          &B[OFFSET2D(tk / KPACK_b8, tn * KPACK_b8, ldb * KPACK_b8)],
+          &C[OFFSET2D(0, tn, ldc)], M, MIN(N - tn, TN), MIN(K - tk, TK), lda,
+          ldb, ldc);
+    }
+  }
+}
+
+// l2 blocking with packed B
+void amx_gemm_i8_l2_blocking_packedB(GEMM_PARAMS_I8) {
 
   for (int tn = 0; tn < N; tn += TN) {
     for (int tk = 0; tk < K; tk += TK) {
@@ -148,241 +207,35 @@ void amx_gemm_i8_l2_tiling_packedB(GEMM_PARAMS_I8) {
   }
 }
 
-// l0 tiling with packed A & B
-void amx_gemm_i8_l0_tiling_packedAB(GEMM_PARAMS_I8) {
-  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
-
-  for (int i = 0; i < M; i += M_STEP) {
-    int8_t *pB = B; // packed B block address
-    for (int j = 0; j < N; j += N_STEP) {
-      amx_tile_load_L2C(0, C, i, j, ldc);
-      amx_tile_load_L2C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_load_L2C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_load_L2C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-
-      int8_t *pA = A + i * K; // packed A block address
-// GEMM core loop
-#pragma unroll 32
-      for (int k = 0; k < K; k += K_STEP) {
-        _tile_stream_loadd(6, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B0
-        _tile_loadd(4, pA, MIN_STRIDE);
-        pA += TILE_SIZE; // tileload A0
-        _tile_stream_loadd(7, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B1
-        _tile_loadd(5, pA, MIN_STRIDE);
-        pA += TILE_SIZE;       // tileload A1
-        _tile_dpbssd(0, 4, 6); // tdp A0, B0
-        _tile_dpbssd(2, 5, 6); // tdp A1, B0
-        _tile_dpbssd(1, 4, 7); // tdp A0, B1
-        _tile_dpbssd(3, 5, 7); // tdp A1, B1
-      }
-      amx_tile_store_L1C(0, C, i, j, ldc);
-      amx_tile_store_L1C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_store_L1C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_store_L1C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-    }
-  }
-}
-
-// l2 tiling with packed A & B
-void amx_gemm_i8_l2_tiling_packedAB(GEMM_PARAMS_I8) {
-
-  // prefetch!
-  void (*func)(GEMM_PARAMS_I8);
-  if (gemm_config.prefetch == PFETCH_NONE) {
-    func = amx_gemm_i8_l0_tiling_packedAB;
-  } else if (gemm_config.prefetch == PFETCH_A) {
-    func = amx_gemm_i8_l0_tiling_prefetchA;
-  } else if (gemm_config.prefetch == PFETCH_AC) {
-    func = amx_gemm_i8_l0_tiling_prefetchAC;
-  } else {
-    assert(gemm_config.prefetch == PFETCH_ABC);
-    func = amx_gemm_i8_l0_tiling_prefetchABC;
-  }
+// l2 blocking with packed A & B
+void amx_gemm_i8_l2_blocking_packedAB(GEMM_PARAMS_I8) {
 
   for (int tn = 0; tn < N; tn += TN) {
     for (int tk = 0; tk < K; tk += TK) {
-      func(A + tk * M,                        // packedA block address
+      amx_gemm_i8_l0_tiling_packedAB(A + tk * M,                        // packedA block address
            B + tn * K + tk * MIN(N - tn, TN), // packedB block address
-           &C[OFFSET2D(0, tn, ldc)], M, MIN(N - tn, TN), MIN(K - tk, TK), lda,
-           ldb, ldc);
+           &C[OFFSET2D(0, tn, ldc)], 
+           M, MIN(N - tn, TN), MIN(K - tk, TK), 
+           lda, ldb, ldc);
     }
   }
 }
 
-#define CACHELINE 64
-// l0 tiling with packed A & B, prefetch A into L2
-void amx_gemm_i8_l0_tiling_prefetchA(GEMM_PARAMS_I8) {
-  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
 
-  for (int i = 0; i < M; i += M_STEP) {
-    int8_t *pB = B;                       // packed B block address
-    int8_t *pA_pf = A + (i + M_STEP) * K; // prefetch address for A
-    for (int j = 0; j < N; j += N_STEP) {
-      amx_tile_load_L2C(0, C, i, j, ldc);
-      amx_tile_load_L2C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_load_L2C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_load_L2C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
+void amx_gemm_i8_single_thread(GEMM_PARAMS_I8) {
 
-      int8_t *pA = A + i * K; // packed A block address
-// GEMM core loop
-#pragma unroll 32
-      for (int k = 0; k < K; k += K_STEP) {
-        _tile_stream_loadd(6, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B0
-        _tile_loadd(4, pA, MIN_STRIDE);
-        pA += TILE_SIZE; // tileload A0
-        _tile_stream_loadd(7, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B1
-        _tile_loadd(5, pA, MIN_STRIDE);
-        pA += TILE_SIZE;       // tileload A1
-        _tile_dpbssd(0, 4, 6); // tdp A0, B0
-        _tile_dpbssd(1, 4, 7); // tdp A0, B1
-        _tile_dpbssd(2, 5, 6); // tdp A1, B0
-        _tile_dpbssd(3, 5, 7); // tdp A1, B1
-        // prefetch A
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-      }
-      amx_tile_store_L1C(0, C, i, j, ldc);
-      amx_tile_store_L1C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_store_L1C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_store_L1C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-    }
+  // choose the appropriate L2 blocking function based on data layout
+  void (*gemm_compute)(GEMM_PARAMS_I8) = NULL;
+  
+  if (gemm_config.packA && gemm_config.packB) {
+    gemm_compute = amx_gemm_i8_l2_blocking_packedAB;
+  } else if (gemm_config.packB) {
+    gemm_compute = amx_gemm_i8_l2_blocking_packedB;
+  } else {
+    gemm_compute = amx_gemm_i8_l2_blocking;
   }
-}
 
-// l0 tiling with packed A & B, prefetch A & C into L2
-void amx_gemm_i8_l0_tiling_prefetchAC(GEMM_PARAMS_I8) {
-  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
-
-  int8_t *pB_pf = B + N * K; // prefetch address for B
-  for (int i = 0; i < M; i += M_STEP) {
-    int8_t *pB = B;                       // packed B block address
-    int8_t *pA_pf = A + (i + M_STEP) * K; // prefetch address for A
-    for (int j = 0; j < N; j += N_STEP) {
-      amx_tile_load_L2C(0, C, i, j, ldc);
-      amx_tile_load_L2C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_load_L2C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_load_L2C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-
-      int8_t *pA = A + i * K; // packed A block address
-      int8_t *pC_pf =
-          (int8_t *)((j + N_STEP <= N)
-                         ? &C[OFFSET2D(i, j + N_STEP, ldc)]
-                         : &C[OFFSET2D(i + M_STEP, 0,
-                                       ldc)]); // prefetch address for C
-      int pfC_cnt = 0;
-
-// GEMM core loop
-#pragma unroll 32
-      for (int k = 0; k < K; k += K_STEP) {
-        _tile_stream_loadd(6, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B0
-        _tile_loadd(4, pA, MIN_STRIDE);
-        pA += TILE_SIZE; // tileload A0
-        _tile_stream_loadd(7, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B1
-        _tile_loadd(5, pA, MIN_STRIDE);
-        pA += TILE_SIZE;       // tileload A1
-        _tile_dpbssd(0, 4, 6); // tdp A0, B0
-        _tile_dpbssd(1, 4, 7); // tdp A0, B1
-        _tile_dpbssd(2, 5, 6); // tdp A1, B0
-        _tile_dpbssd(3, 5, 7); // tdp A1, B1
-        // prefetch A
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-        // prefetch C
-        if (likely(pfC_cnt < 4096 / CACHELINE)) { //  prefetch C
-          _mm_prefetch(pC_pf, _MM_HINT_T1);
-          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
-          pC_pf += ldc * sizeof(int32_t); // move to next row
-          _mm_prefetch(pC_pf, _MM_HINT_T1);
-          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
-          pC_pf += ldc * sizeof(int32_t); // move to next row
-          pfC_cnt += 4;
-        }
-      }
-      amx_tile_store_L1C(0, C, i, j, ldc);
-      amx_tile_store_L1C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_store_L1C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_store_L1C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-    }
-  }
-}
-
-// l0 tiling with packed A & B, prefetch A & C into L2, and B into L3
-void amx_gemm_i8_l0_tiling_prefetchABC(GEMM_PARAMS_I8) {
-  assert(M % M_STEP == 0 && N % N_STEP == 0 && K % K_STEP == 0);
-
-#define DO_PREFETCH_B (pB_pf < B + 2 * N * K)
-  int8_t *pB_pf = B + N * K; // prefetch address for B
-  for (int i = 0; i < M; i += M_STEP) {
-    int8_t *pB = B;                       // packed B block address
-    int8_t *pA_pf = A + (i + M_STEP) * K; // prefetch address for A
-    for (int j = 0; j < N; j += N_STEP) {
-      amx_tile_load_L2C(0, C, i, j, ldc);
-      amx_tile_load_L2C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_load_L2C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_load_L2C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-
-      int8_t *pA = A + i * K; // packed A block address
-      int8_t *pC_pf =
-          (int8_t *)((j + N_STEP <= N)
-                         ? &C[OFFSET2D(i, j + N_STEP, ldc)]
-                         : &C[OFFSET2D(i + M_STEP, 0,
-                                       ldc)]); // prefetch address for C
-      int pfC_cnt = 0;
-
-// GEMM core loop
-#pragma unroll 32
-      for (int k = 0; k < K; k += K_STEP) {
-        _tile_stream_loadd(6, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B0
-        _tile_loadd(4, pA, MIN_STRIDE);
-        pA += TILE_SIZE; // tileload A0
-        _tile_stream_loadd(7, pB, MIN_STRIDE);
-        pB += TILE_SIZE; // tileload B1
-        _tile_loadd(5, pA, MIN_STRIDE);
-        pA += TILE_SIZE;       // tileload A1
-        _tile_dpbssd(0, 4, 6); // tdp A0, B0
-        _tile_dpbssd(1, 4, 7); // tdp A0, B1
-        _tile_dpbssd(2, 5, 6); // tdp A1, B0
-        _tile_dpbssd(3, 5, 7); // tdp A1, B1
-        // prefetch A
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-        _mm_prefetch(pA_pf, _MM_HINT_T1);
-        pA_pf += CACHELINE;
-        // prefetch B
-        if (likely(pB_pf < B + 2 * N * K)) {
-          _mm_prefetch(pB_pf, _MM_HINT_T2);
-          pB_pf += CACHELINE;
-          _mm_prefetch(pB_pf, _MM_HINT_T2);
-          pB_pf += CACHELINE;
-        }
-        // prefetch C
-        if (likely(pfC_cnt < 4096 / CACHELINE)) { //  prefetch C
-          _mm_prefetch(pC_pf, _MM_HINT_T1);
-          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
-          pC_pf += ldc * sizeof(int32_t); // move to next row
-          _mm_prefetch(pC_pf, _MM_HINT_T1);
-          _mm_prefetch(pC_pf + CACHELINE, _MM_HINT_T1);
-          pC_pf += ldc * sizeof(int32_t); // move to next row
-          pfC_cnt += 4;
-        }
-      }
-      amx_tile_store_L1C(0, C, i, j, ldc);
-      amx_tile_store_L1C(1, C, i, j + MAX_ROWS, ldc);
-      amx_tile_store_L1C(2, C, i + MAX_ROWS, j, ldc);
-      amx_tile_store_L1C(3, C, i + MAX_ROWS, j + MAX_ROWS, ldc);
-    }
-  }
+  gemm_compute(A, B, C, M, N, K, lda, ldb, ldc);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -414,19 +267,19 @@ int split_cores(int num_core, int M, int N) {
   return core_m;
 }
 
-// amx_gemm_i8_l2_tiling_packedAB with OpenMP parallelization
+// amx_gemm_i8_l2_blocking with OpenMP parallelization
 // Divide into `(m_core*n_core)` tasks in both M and N dimensions
-void amx_gemm_i8_l2_tiling_omp(GEMM_PARAMS_I8) {
+void amx_gemm_i8_l2_blocking_omp(GEMM_PARAMS_I8) {
   // printf("We can use %d threads for OpenMP parallelization here.\n",
   // omp_get_max_threads());
 
-  if (gemm_config.omp_parallel ==
-      OMP_AUTO) { // Lets have OpenMP split the tasks automatically
-#pragma omp parallel for collapse(2)
+  if (gemm_config.omp_parallel == OMP_AUTO) { 
+    // Lets have OpenMP split the tasks automatically
+    #pragma omp parallel for collapse(2)
     for (int tm = 0; tm < M; tm += TM) {
       for (int tn = 0; tn < N; tn += TN) {
         for (int tk = 0; tk < K; tk += TK) {
-          amx_gemm_i8_l0_tiling_prefetchAC(
+          amx_gemm_i8_l0_tiling_packedAB(
               A + tm * K + tk * MIN(M - tm, TM), // packedA block address
               B + tn * K + tk * MIN(N - tn, TN), // packedB block address
               &C[OFFSET2D(tm, tn, ldc)], MIN(M - tm, TM), MIN(N - tn, TN),
@@ -436,12 +289,12 @@ void amx_gemm_i8_l2_tiling_omp(GEMM_PARAMS_I8) {
     }
   }
 
-  else if (gemm_config.omp_parallel ==
-           OMP_MANUAL) { // We split the tasks manually
+  else if (gemm_config.omp_parallel == OMP_MANUAL) { 
+    // We split the tasks manually
     int core_m = split_cores(gemm_config.num_core, M,
                              N); // split num_core into core_m x core_n
     int core_n = gemm_config.num_core / core_m;
-#pragma omp parallel num_threads(gemm_config.num_core)
+    #pragma omp parallel num_threads(gemm_config.num_core)
     {
       int thread_id = omp_get_thread_num();
 
@@ -453,7 +306,7 @@ void amx_gemm_i8_l2_tiling_omp(GEMM_PARAMS_I8) {
       for (int tm = m_start; tm < M; tm += core_m * TM) {
         for (int tn = n_start; tn < N; tn += core_n * TN) {
           for (int tk = 0; tk < K; tk += TK) {
-            amx_gemm_i8_l0_tiling_prefetchAC(
+            amx_gemm_i8_l0_tiling_packedAB(
                 A + tm * K + tk * MIN(M - tm, TM), // packedA block address
                 B + tn * K + tk * MIN(N - tn, TN), // packedB block address
                 &C[OFFSET2D(tm, tn, ldc)], MIN(M - tm, TM), MIN(N - tn, TN),
@@ -488,8 +341,8 @@ void amx_gemm_i8_l2_tiling_omp(GEMM_PARAMS_I8) {
   }
 }
 
-// amx_gemm_i8_l2_tiling_omp on separate numa nodes
-void amx_gemm_i8_l2_tiling_numa(GEMM_PARAMS_I8_NUMA) {
+// amx_gemm_i8_l2_blocking_omp on separate numa nodes
+void amx_gemm_i8_l2_blocking_numa(GEMM_PARAMS_I8_NUMA) {
 
   // we divide the tasks on the M dimension
   // and dispatch the tasks to each numa node
@@ -516,7 +369,7 @@ void amx_gemm_i8_l2_tiling_numa(GEMM_PARAMS_I8_NUMA) {
     for (int tm = m_start; tm < M_div; tm += core_m * TM) {
       for (int tn = n_start; tn < N; tn += core_n * TN) {
         for (int tk = 0; tk < K; tk += TK) {
-          amx_gemm_i8_l0_tiling_prefetchAC(
+          amx_gemm_i8_l0_tiling_packedAB(
               A + tm * K + tk * MIN(M_div - tm, TM), // packedA block address
               B + tn * K + tk * MIN(N - tn, TN),     // packedB block address
               &C[OFFSET2D(tm, tn, ldc)], MIN(M_div - tm, TM), MIN(N - tn, TN),
@@ -690,21 +543,18 @@ void amx_copyC_i8(int32_t *__restrict__ C, void *C1, const int M, const int N) {
   }
 }
 
+
+
 // Top level AMX GEMM function for integer 8-bit matrix multiplication
 // It will call the appropriate tiling function based on the configuration
 void amx_gemm_i8(GEMM_PARAMS) {
 
   if (gemm_config.use_numa) {
-    amx_gemm_i8_l2_tiling_numa(A, B, C, M, N, K, lda, ldb, ldc);
+    amx_gemm_i8_l2_blocking_numa(A, B, C, M, N, K, lda, ldb, ldc);
   } else if (gemm_config.num_core > 1) {
-    amx_gemm_i8_l2_tiling_omp(A, B, C, M, N, K, lda, ldb, ldc);
-  } else if (gemm_config.packA && gemm_config.packB) {
-    amx_gemm_i8_l2_tiling_packedAB(A, B, C, M, N, K, lda, ldb, ldc);
-  } else if (gemm_config.packA && !gemm_config.packB) {
-    amx_gemm_i8_l2_tiling_packedB(A, B, C, M, N, K, lda, ldb, ldc);
+    amx_gemm_i8_l2_blocking_omp(A, B, C, M, N, K, lda, ldb, ldc);
   } else {
-    // amx_gemm_i8_l0_tiling(A, B, C, M, N, K, lda, ldb, ldc);
-    amx_gemm_i8_l2_tiling(A, B, C, M, N, K, lda, ldb, ldc);
+    amx_gemm_i8_single_thread(A, B, C, M, N, K, lda, ldb, ldc);
   }
 }
 

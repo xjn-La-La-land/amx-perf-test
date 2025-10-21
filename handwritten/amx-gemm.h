@@ -48,9 +48,6 @@
 #ifndef TK
 #define TK 1472
 #endif
-// #define TM 1024
-// #define TN 1024
-// #define TK 1024
 
 #if !defined(likely)
 #define likely(cond) __builtin_expect(cond, 1)
@@ -71,20 +68,19 @@ typedef struct {
 
   bool packA;       // whether to pack matrix A
   bool packB;       // whether to pack matrix B
-  int prefetch;     // prefetching strategy
   int omp_parallel; // OpenMP parallelization ctrl
 
   double frequency; // CPU frequency in Hz
   int loop_count;   // number of loops for performance test
 } gemm_config_t;
 
-#define NUM_CORE_PER_NODE                                                      \
-  30 // number of CPU cores per numa node (physical core)
+// number of CPU cores per numa node (physical core)
+#define NUM_CORE_PER_NODE 30
 
-#define PFETCH_NONE 0
-#define PFETCH_A 1
-#define PFETCH_AC 2
-#define PFETCH_ABC 3
+// prefetch strategy
+#define PFETCH_A
+// #define PFETCH_B
+#define PFETCH_C
 
 #define OMP_AUTO 0
 #define OMP_MANUAL 1
@@ -94,7 +90,6 @@ typedef struct {
       .use_numa = false,                                                       \
       .packA = true,                                                           \
       .packB = true,                                                           \
-      .prefetch = PFETCH_AC,                                                   \
       .omp_parallel = OMP_MANUAL,                                              \
       .frequency = 2.3e9, /* default frequency 2.3GHz */                       \
       .loop_count = 10,                                                        \

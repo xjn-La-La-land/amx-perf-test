@@ -67,8 +67,7 @@ void test_performance(const size_t M, const size_t N, const size_t K) {
     B1 = B; // use original B if not packing
   void *C1 = NULL;
   if (gemm_config.use_numa)
-    C1 = amx_reallocC_i8(C, M,
-                         N); // re-allocate C for NUMA-aware parallelization
+    C1 = amx_reallocC_i8(C, M, N); // re-allocate C for NUMA-aware parallelization
   else
     C1 = C; // use original C if not NUMA-aware
 
@@ -184,13 +183,23 @@ int main(int argc, char *argv[]) {
   printf("Matrix Layout: A - %s, B - %s\n",
          gemm_config.packA ? "packed" : "normal",
          gemm_config.packB ? "packed" : "normal");
+  printf("Prefetch Strategy: ");
+#if defined(PFETCH_A) && defined(PFETCH_B) && defined(PFETCH_C)
+  printf("prefetch A, B, C\n");
+#elif defined(PFETCH_A) && defined(PFETCH_C)
+  printf("prefetch A, C\n");
+#elif defined(PFETCH_A)
+  printf("prefetch A\n");
+#else
+  printf("no prefetch\n");
+#endif
   printf("Running %d rounds!\n", gemm_config.loop_count);
   printf(LINE);
 
   // test_correctness(1024, 2048, 2048);
 
   // general test
-  for (int i = 512; i <= 32768; i += 512) {
+  for (int i = 512; i <= 16384; i += 512) {
     int m = ROUNDUP(i, TM);
     int n = ROUNDUP(i, TN);
     int k = ROUNDUP(i, TK);
